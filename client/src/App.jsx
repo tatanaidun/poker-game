@@ -1,4 +1,3 @@
-// client/src/App.jsx
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
@@ -32,40 +31,69 @@ function CardView({ card, onClick, isJoker, style }) {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        margin: 4,
         padding: 8,
         border: isJoker ? "2px solid orange" : "1px solid #ccc",
         borderRadius: 8,
         cursor: onClick ? "pointer" : "default",
-        minWidth: 52,
-        minHeight: 68,
+        width: 52, // Fixed width to prevent collapsing
+        height: 72, // Fixed height
         textAlign: "center",
         background: "#fff",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
         userSelect: "none",
         ...style,
       }}
     >
-      <div style={{ fontWeight: 700 }}>{card.rank}</div>
-      <div style={{ fontSize: 14 }}>{card.suit}</div>
+      <div style={{ fontWeight: 700, fontSize: 16 }}>{card.rank}</div>
+      <div style={{ fontSize: 18, lineHeight: 1 }}>{card.suit}</div>
       {isJoker && <div style={{ fontSize: 12 }}>★</div>}
     </div>
   );
 }
 
-/*
-  DraggableCard:
-  - drag source: item contains { card, fromGroup (null for hand), index (for hand index) }
-  - also acts as drop target for hand-slot reordering (we handle reorder on drop)
+// function DraggableDiscardCard({ card, canDrag, send }) {
+//   const [{ isDragging }, dragRef] = useDrag({
+//     type: CARD_ITEM,
+//     item: { card, fromGroup: "discard", index: 0 },
+//     canDrag: canDrag, // Set based on canPlay and hand.length === 13
+//     collect: (monitor) => ({
+//       isDragging: monitor.isDragging(),
+//     }),
+//   });
+
+//   return (
+//     <div
+//       ref={dragRef}
+//       style={{
+//         opacity: isDragging ? 0.35 : 1,
+//         cursor: canDrag ? "grab" : "default",
+//         transform: isDragging ? "scale(1.04)" : "none",
+//         transition: "transform 120ms ease, opacity 120ms ease",
+//       }}
+//     >
+//       <CardView
+//         card={card}
+//         isJoker={card.rank === "JOKER"}
+//         // This click handler is for fallback/non-DND picking
+//         onClick={() => {
+//           if (canDrag) send({ type: "pick_discard" });
+//         }}
+//       />
+//     </div>
+//   );
+// }
+
+/* DraggableCard 
+  Added 'style' prop so parent components (Bucket) can control margins 
 */
 function DraggableCard({
   card,
-  fromGroup = null, // null → hand, number → group index
-  index = null, // card index inside hand or group
+  fromGroup = null,
+  index = null,
   onClick,
   onDropToHand,
+  style = {},
 }) {
-  // Drag source
   const [{ isDragging }, dragRef] = useDrag({
     type: CARD_ITEM,
     item: { card, fromGroup, index },
@@ -74,11 +102,10 @@ function DraggableCard({
     }),
   });
 
-  // Accept drop ON TOP of this card (hand reordering)
   const [, dropRef] = useDrop({
     accept: CARD_ITEM,
     drop: (item) => {
-      // Both must be from hand to reorder
+      // 1. Hand Reorder
       if (
         item.fromGroup === null &&
         fromGroup === null &&
@@ -86,15 +113,17 @@ function DraggableCard({
         typeof index === "number"
       ) {
         if (item.index !== index) {
-          onDropToHand?.(item.index, index);
+          onDropToHand(item.index, index);
         }
       }
-      // groups handled elsewhere
+      // 2. Group -> Hand (Dropped ON TOP of a card)
+      else if (item.fromGroup !== null && fromGroup === null) {
+        onDropToHand(item.fromGroup, index, item.card);
+      }
       return undefined;
     },
   });
 
-  // merge drag & drop refs
   const attachRef = useCallback(
     (node) => {
       dragRef(node);
@@ -107,9 +136,13 @@ function DraggableCard({
     <div
       ref={attachRef}
       style={{
+        // FIX: inline-block ensures it sits nicely in the Bucket row
+        display: "inline-block",
         opacity: isDragging ? 0.35 : 1,
         transform: isDragging ? "scale(1.04)" : "none",
         transition: "transform 120ms ease, opacity 120ms ease",
+        verticalAlign: "top", // Aligns cards in bucket
+        ...style,
       }}
     >
       <CardView card={card} isJoker={card.rank === "JOKER"} onClick={onClick} />
@@ -117,22 +150,17 @@ function DraggableCard({
   );
 }
 
-/*
-  HandSlot: an empty slot area between cards which acts as a drop target.
-  We render these between items to allow dropping at ends or between cards.
-*/
+/* HandSlot */
 function HandSlot({ targetIndex, onDropHere }) {
-  const [, dropRef] = useDrop({
+  const [{ isOver }, dropRef] = useDrop({
     accept: CARD_ITEM,
     drop: (item) => {
       if (item.fromGroup === null) {
-        // from hand → reorder
         onDropHere({
           fromHandIndex: item.index,
           toHandIndex: targetIndex,
         });
       } else {
-        // from group → hand insert
         onDropHere({
           fromGroupIndex: item.fromGroup,
           toHandIndex: targetIndex,
@@ -140,31 +168,32 @@ function HandSlot({ targetIndex, onDropHere }) {
         });
       }
     },
+    collect: (m) => ({ isOver: m.isOver() }),
   });
 
   return (
     <div
       ref={dropRef}
       style={{
-        width: 10,
-        minHeight: 70,
-        margin: "0 3px",
+        width: 12,
+        height: 72,
+        margin: "0 2px",
         display: "inline-block",
-        background: "transparent",
+        background: isOver ? "rgba(0,0,255,0.1)" : "transparent",
+        borderRadius: 4,
+        verticalAlign: "middle",
       }}
     />
   );
 }
 
-/*
-  Bucket (group) drop target:
-  - Accepts CARD_ITEM drops. On drop we call addCard(item.card, item.fromGroup, bucketIndex)
-  - Visual highlight when hovered.
-*/
+/* Bucket */
 function Bucket({ cards, index, addCard }) {
   const [{ isOver }, dropRef] = useDrop({
     accept: CARD_ITEM,
     drop: (item) => {
+      console.log("I m, here", item);
+      if (item.fromGroup === index) return;
       addCard(item.card, item.fromGroup, index);
     },
     collect: (m) => ({ isOver: m.isOver({ shallow: true }) }),
@@ -174,37 +203,53 @@ function Bucket({ cards, index, addCard }) {
     <div
       ref={dropRef}
       style={{
-        minWidth: 160,
-        minHeight: 92,
-        border: `2px dashed ${isOver ? "#40a9ff" : "#bbb"}`,
-        margin: 6,
+        minWidth: 140,
+        minHeight: 100,
+        border: `2px dashed ${isOver ? "#40a9ff" : "#ccc"}`,
+        margin: "0 8px 8px 0",
         padding: 8,
         borderRadius: 8,
+        background: isOver ? "#f0fbff" : "#fafafa",
+        transition: "all 0.2s",
+        // Flex container controls layout
         display: "flex",
         flexWrap: "wrap",
         alignContent: "flex-start",
-        background: isOver ? "#f0fbff" : "#fafafa",
-        transition: "border-color 120ms, background 120ms",
+        gap: 4, // Handles spacing between cards
       }}
     >
       {cards.length === 0 ? (
-        <div style={{ color: "#999", padding: 8 }}>Drop here</div>
+        <div
+          style={{
+            color: "#999",
+            width: "100%",
+            textAlign: "center",
+            marginTop: 30,
+          }}
+        >
+          Drop Group
+        </div>
       ) : (
-        cards.map((c) => (
-          <div key={c.id} style={{ margin: 4 }}>
-            <CardView card={c} isJoker={c.rank === "JOKER"} />
-          </div>
+        cards.map((c, idx) => (
+          // FIX: Pass margin via style directly to DraggableCard
+          // Removed redundant wrapping <div> which was breaking flex layout
+          <DraggableCard
+            key={c.id}
+            card={c}
+            fromGroup={index}
+            index={idx}
+            onDropToHand={() => {}}
+            style={{ margin: 0 }}
+          />
         ))
       )}
     </div>
   );
 }
 
-/* ---------- Main App ---------- */
-
+/* Main App */
 export default function App() {
   const wsRef = useRef(null);
-
   const [playerIndex, setPlayerIndex] = useState(null);
   const [playersConnected, setPlayersConnected] = useState(0);
   const [gameStarted, setGameStarted] = useState(false);
@@ -213,11 +258,11 @@ export default function App() {
   const [hand, setHand] = useState([]);
   const [deckCount, setDeckCount] = useState(0);
   const [discardPile, setDiscardPile] = useState([]);
-  const [groups, setGroups] = useState([[], [], [], []]); // 4 buckets by default
+  const [groups, setGroups] = useState([[], [], [], []]);
+
   const [turn, setTurn] = useState(0);
   const [specialJoker, setSpecialJoker] = useState(null);
 
-  // Setup websocket once
   useEffect(() => {
     const ws = new WebSocket("ws://localhost:8080");
     wsRef.current = ws;
@@ -233,11 +278,9 @@ export default function App() {
         setPlayerIndex(msg.player);
         setPlayersConnected(msg.players || 1);
       }
-
       if (msg.type === "players") {
         setPlayersConnected(msg.players || 0);
       }
-
       if (msg.type === "player_left") {
         alert(`Player ${msg.slot + 1} left`);
         setGameStarted(false);
@@ -245,10 +288,10 @@ export default function App() {
         setDeckCount(0);
         setDiscardPile([]);
         setGroups([[], [], [], []]);
+
         setTurn(0);
         setSpecialJoker(null);
       }
-
       if (msg.type === "game_start") {
         setGameStarted(true);
         setGameOver(false);
@@ -258,7 +301,6 @@ export default function App() {
         setTurn(msg.turn || 0);
         setGroups([[], [], [], []]);
 
-        // server includes per-client playerIndex in each message; prefer that
         const idx =
           typeof msg.playerIndex === "number"
             ? msg.playerIndex
@@ -266,36 +308,33 @@ export default function App() {
         if (msg.hands && typeof idx === "number") {
           setHand(msg.hands[idx] || []);
         } else {
-          setHand([]); // will get update soon
+          setHand([]);
         }
       }
-
       if (msg.type === "update") {
         setDeckCount(msg.deckCount || 0);
         setDiscardPile(msg.discardPile || []);
         setTurn(typeof msg.turn === "number" ? msg.turn : turn);
-        setGroups(msg.groups || [[], [], [], []]);
-        // msg.playerIndex is per-client; server already included it
+
+        const playerGroups = msg.groups[playerIndex];
+        if (playerGroups && Array.isArray(playerGroups)) {
+          setGroups(playerGroups); // Use the player's groups directly
+        }
+
         if (typeof msg.playerIndex === "number" && msg.hands) {
           setHand(msg.hands[msg.playerIndex] || []);
         } else if (msg.hands && typeof playerIndex === "number") {
           setHand(msg.hands[playerIndex] || []);
         }
       }
-
       if (msg.type === "win") {
         alert(`Player ${msg.winner + 1} wins!`);
         setGameOver(true);
         setGameStarted(false);
       }
-
       if (msg.type === "invalid_declare") {
         alert("Server says: invalid declaration.");
       }
-    };
-
-    ws.onclose = () => {
-      // connection closed
     };
 
     return () => {
@@ -305,7 +344,6 @@ export default function App() {
         console.log(e);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const send = (payload) => {
@@ -316,95 +354,78 @@ export default function App() {
   const canPlay =
     gameStarted && !gameOver && playersConnected === 2 && playerIndex === turn;
 
-  // Draw from deck (server authoritative)
   const onDraw = () => {
     if (!canPlay) return alert("Not your turn");
     send({ type: "draw" });
   };
 
-  // Discard (server authoritative)
   const onDiscard = (card) => {
     if (!canPlay) return alert("Not your turn");
     send({ type: "discard", card });
   };
 
-  // Reorder in-hand after drop: called when card dropped onto a HandSlot or onto another card
-  // fromIdx: original index, toIdx: desired index (0..hand.length)
   const reorderInHand = (fromIdx, toIdx) => {
     if (fromIdx === toIdx) return;
     const newHand = [...hand];
     const [moving] = newHand.splice(fromIdx, 1);
     newHand.splice(toIdx, 0, moving);
     setHand(newHand);
-    // persist order on server (send IDs)
     send({ type: "reorder", order: newHand.map((c) => c.id) });
   };
 
-  // Add card to group (move from hand or from another group to target group)
-  // card: card object
-  // fromGroup: null (hand) or index
-  // toGroup: index
   const addCardToGroup = (card, fromGroup, toGroup) => {
     const newGroups = groups.map((g) => [...g]);
 
-    // remove from source
-    if (fromGroup === null) {
-      // remove from hand locally (optimistic)
-      setHand((prev) => prev.filter((c) => c.id !== card.id));
-    } else {
-      newGroups[fromGroup] = newGroups[fromGroup].filter(
-        (c) => c.id !== card.id
+    // --- FIX 1: Explicitly handle removal from source group ---
+    if (fromGroup !== null) {
+      const sourceGroupIndex = newGroups[fromGroup].findIndex(
+        (c) => c.id === card.id
       );
+      if (sourceGroupIndex !== -1) {
+        newGroups[fromGroup].splice(sourceGroupIndex, 1);
+      }
+    }
+    console.log("toGroup", toGroup, newGroups);
+    // Add to target group
+    newGroups[toGroup].push(card);
+    console.log(newGroups, "I am jhere 2");
+    setGroups(newGroups);
+
+    // If from hand, remove from hand locally (This part was correct)
+    let newHand = [...hand];
+    if (fromGroup === null) {
+      newHand = hand.filter((c) => c.id !== card.id);
+      setHand(newHand);
     }
 
-    // add to dest
-    newGroups[toGroup].push(card);
-    setGroups(newGroups);
-
-    // send grouping update to server
+    // Sync everything
     send({ type: "group", groups: newGroups });
+    if (fromGroup === null) {
+      send({ type: "sync_hand", hand: newHand.map((c) => c.id) });
+    }
   };
 
-  // Move card from group back into hand at position (drop into hand slot)
-  // If card originates from a group, server grouping update will be sent when we call addCardToGroup with fromGroup and target as null.
-  // We'll implement hand-slot drop behavior to accept cards from group: HandSlot handles that by passing fromGroup index
   const addCardFromGroupToHandAt = (fromGroup, atIndex, card) => {
-    // remove from group locally
     const newGroups = groups.map((g) => [...g]);
     newGroups[fromGroup] = newGroups[fromGroup].filter((c) => c.id !== card.id);
+    console.log("I ma here eaks", newGroups);
     setGroups(newGroups);
 
-    // insert into hand at atIndex
     const newHand = [...hand];
     newHand.splice(atIndex, 0, card);
     setHand(newHand);
-    // notify server: mapping groups -> newGroups, and reorder -> new hand order
-    send({ type: "group", groups: newGroups });
-    send({ type: "reorder", order: newHand.map((c) => c.id) });
+
+    // send({ type: "group", groups: newGroups });
+    // send({ type: "sync_hand", hand: newHand.map((c) => c.id) });
+    send({
+      type: "move_group_to_hand",
+      cardId: card.id,
+      fromGroupIndex: fromGroup,
+      toHandOrder: newHand.map((c) => c.id), // Send the full resulting hand order
+    });
   };
 
   const onDeclare = () => {
-    // local quick validation
-    let hasPure = false,
-      hasDummy = false;
-    groups.forEach((g) => {
-      if (g.length >= 3) {
-        const suits = g
-          .filter((c) => c.rank !== "JOKER")
-          .map((c) => c.suit)
-          .filter(Boolean);
-        if (suits.length > 0 && new Set(suits).size === 1) hasPure = true;
-        else hasDummy = true;
-      }
-    });
-    if (!hasPure || !hasDummy) {
-      if (
-        !confirm(
-          "Local check suggests declaration may be invalid. Send to server anyway?"
-        )
-      )
-        return;
-    }
     send({ type: "declare" });
   };
 
@@ -425,41 +446,76 @@ export default function App() {
 
   return (
     <DndProvider backend={HTML5Backend}>
-      <div style={{ padding: 20, fontFamily: "Inter, system-ui, Arial" }}>
-        <h2>13-Card Rummy (Two-Player)</h2>
+      <div
+        style={{
+          padding: 20,
+          fontFamily: "Inter, system-ui, Arial",
+          background: "#f4f4f4",
+          minHeight: "100vh",
+        }}
+      >
+        <h2 style={{ marginTop: 0 }}>13-Card Rummy</h2>
 
-        <div style={{ marginBottom: 8 }}>
-          <strong>You are:</strong>{" "}
-          {typeof playerIndex === "number"
-            ? `Player ${playerIndex + 1}`
-            : "..."}
-          {"  "}
-          <small style={{ color: "#666" }}>
-            {playersConnected}/2 connected
-          </small>
+        <div
+          style={{
+            marginBottom: 8,
+            padding: 10,
+            background: "#fff",
+            borderRadius: 8,
+          }}
+        >
+          <strong>
+            Player {typeof playerIndex === "number" ? playerIndex + 1 : "?"}
+          </strong>
+          {" | "} Status: {gameStarted ? "Playing" : "Waiting"}
+          {" | "} <small>{playersConnected}/2</small>
         </div>
 
         {!gameStarted ? (
-          <div>
-            <p>Waiting for both players to join...</p>
-          </div>
+          <div>Waiting for players...</div>
         ) : (
           <>
-            <div style={{ marginBottom: 12 }}>
-              <div>
-                Turn: <strong>Player {turn + 1}</strong>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 12,
+              }}
+            >
+              <div style={{ fontSize: 18 }}>
+                Turn:{" "}
+                <strong
+                  style={{ color: turn === playerIndex ? "green" : "red" }}
+                >
+                  {turn === playerIndex ? "YOUR TURN" : `Player ${turn + 1}`}
+                </strong>
               </div>
-              <div>Deck left: {deckCount}</div>
+              <div>Deck: {deckCount}</div>
             </div>
 
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <button onClick={onDraw} disabled={!canPlay || deckCount === 0}>
-                Draw
+            <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+              {/* Controls */}
+              <button
+                onClick={onDraw}
+                disabled={!canPlay || deckCount === 0}
+                style={{ padding: "8px 16px" }}
+              >
+                Draw Deck
               </button>
-              <button onClick={sortHand} disabled={!gameStarted}>
+              <button onClick={sortHand} style={{ padding: "8px 16px" }}>
                 Sort Hand
               </button>
-              <button onClick={onDeclare} disabled={!canPlay}>
+              <button
+                onClick={onDeclare}
+                disabled={!canPlay}
+                style={{
+                  padding: "8px 16px",
+                  background: "#ff4d4f",
+                  color: "white",
+                  border: "none",
+                }}
+              >
                 Declare
               </button>
             </div>
@@ -467,90 +523,91 @@ export default function App() {
             <div
               style={{
                 display: "flex",
-                gap: 24,
+                gap: 30,
                 alignItems: "flex-start",
-                marginBottom: 18,
+                marginBottom: 20,
               }}
             >
-              <div style={{ minWidth: 180 }}>
-                <h4>Discard (open)</h4>
+              {/* Discard Pile */}
+              <div style={{ minWidth: 120 }}>
+                <h4 style={{ marginTop: 0 }}>Discard</h4>
                 {discardPile.length > 0 ? (
                   <CardView
                     card={discardPile[0]}
                     isJoker={discardPile[0].rank === "JOKER"}
+                    onClick={() => {
+                      // --- FIX 2: Discard Pick Handler ---
+                      if (canPlay && hand.length === 13) {
+                        // Only allow picking discard if it's your turn AND you only have 13 cards (i.e., you haven't drawn yet)
+                        send({ type: "pick_discard" });
+                      } else if (canPlay) {
+                        alert(
+                          "You must draw only one card per turn. You may not pick the discard pile."
+                        );
+                      } else {
+                        alert("It is not your turn.");
+                      }
+                    }}
+                    style={{
+                      cursor:
+                        canPlay && hand.length === 13 ? "pointer" : "default",
+                    }}
                   />
                 ) : (
-                  <div style={{ color: "#666" }}>Empty</div>
+                  <div
+                    style={{
+                      width: 52,
+                      height: 72,
+                      border: "2px dashed #ccc",
+                      borderRadius: 8,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#999",
+                    }}
+                  >
+                    Empty
+                  </div>
                 )}
               </div>
 
-              <div style={{ flex: 1 }}>
-                <h4>Your Hand</h4>
+              {/* Hand */}
+              <div style={{ flex: 1, overflowX: "auto" }}>
+                <h4 style={{ marginTop: 0 }}>Your Hand</h4>
                 <div
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 4,
-                    flexWrap: "nowrap",
-                    overflowX: "auto",
-                    paddingBottom: 8,
+                    paddingBottom: 10,
                   }}
                 >
-                  {/* Left slot (drop before first card) */}
                   <HandSlot
                     targetIndex={0}
-                    onDropHere={(sourceGroupOrIndex, targetIndex, card) => {
-                      const isFromHand =
-                        typeof sourceGroupOrIndex === "number" && !card;
-                      const isFromGroup =
-                        typeof sourceGroupOrIndex === "number" && card;
-
-                      if (isFromHand) {
-                        // Reorder within hand
-                        reorderInHand(sourceGroupOrIndex, targetIndex);
-                      } else if (isFromGroup) {
-                        // Move from group → hand
-                        addCardFromGroupToHandAt(
-                          sourceGroupOrIndex,
-                          targetIndex,
-                          card
-                        );
-                      }
+                    onDropHere={(src, tgt, card) => {
+                      if (card) addCardFromGroupToHandAt(src, tgt, card);
+                      else reorderInHand(src, tgt);
                     }}
                   />
-
                   {hand.map((c, idx) => (
                     <span
                       key={c.id}
-                      style={{ display: "inline-flex", alignItems: "center" }}
+                      style={{ display: "flex", alignItems: "center" }}
                     >
                       <DraggableCard
                         card={c}
                         fromGroup={null}
                         index={idx}
                         onClick={() => canPlay && onDiscard(c)}
-                        onDropToHand={(srcIndex, tgtIndex) =>
-                          reorderInHand(srcIndex, tgtIndex)
-                        }
+                        onDropToHand={(s, t, card) => {
+                          if (card) addCardFromGroupToHandAt(s, t, card);
+                          else reorderInHand(s, t);
+                        }}
                       />
-                      {/* slot after this card */}
                       <HandSlot
                         targetIndex={idx + 1}
-                        onDropHere={(sourceGroupOrIndex, targetIndex, card) => {
-                          const isFromHand =
-                            typeof sourceGroupOrIndex === "number" && !card;
-                          const isFromGroup =
-                            typeof sourceGroupOrIndex === "number" && card;
-
-                          if (isFromHand) {
-                            reorderInHand(sourceGroupOrIndex, targetIndex);
-                          } else if (isFromGroup) {
-                            addCardFromGroupToHandAt(
-                              sourceGroupOrIndex,
-                              targetIndex,
-                              card
-                            );
-                          }
+                        onDropHere={(src, tgt, card) => {
+                          if (card) addCardFromGroupToHandAt(src, tgt, card);
+                          else reorderInHand(src, tgt);
                         }}
                       />
                     </span>
@@ -559,9 +616,10 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ marginBottom: 12 }}>
-              <h4>Groups (Drag cards here)</h4>
-              <div style={{ display: "flex", gap: 8 }}>
+            {/* Groups Area */}
+            <div>
+              <h4 style={{ marginTop: 0 }}>Groups (Drag to Organize)</h4>
+              <div style={{ display: "flex", flexWrap: "wrap" }}>
                 {groups.map((g, i) => (
                   <Bucket
                     key={i}
@@ -573,13 +631,19 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ marginTop: 12 }}>
-              <h4>Special Joker</h4>
-              {specialJoker ? (
-                <CardView card={specialJoker} isJoker />
-              ) : (
-                <div>—</div>
-              )}
+            <div
+              style={{
+                marginTop: 20,
+                padding: 10,
+                background: "#fff",
+                borderRadius: 8,
+                display: "inline-block",
+              }}
+            >
+              <strong>Special Joker: </strong>
+              {specialJoker
+                ? `${specialJoker.rank} ${specialJoker.suit || "★"}`
+                : "None"}
             </div>
           </>
         )}
