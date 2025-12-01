@@ -17,7 +17,7 @@ const RANKS = [
   "Q",
   "K",
 ];
-
+// Global Rank Order array used for sequence validation
 const RANK_ORDER = [
   "A",
   "2",
@@ -33,123 +33,6 @@ const RANK_ORDER = [
   "Q",
   "K",
 ];
-
-/**
- * Checks if a group is a valid Set or Sequence.
- * Returns { valid: boolean, type: 'pure' | 'impure' | 'set' | null }
- */
-function checkGroupValidity(group, specialJoker) {
-  const len = group.length;
-  if (len < 3) return { valid: false, type: null }; // Min 3 cards for set/sequence
-
-  // Identify Jokers: includes two printed Jokers and the Special Joker rank
-  const isJoker = (card) =>
-    card.rank === "JOKER" || (specialJoker && card.rank === specialJoker.rank);
-
-  const jokers = group.filter(isJoker);
-  const jokerCount = jokers.length;
-  const actualCards = group.filter((c) => !isJoker(c));
-
-  // --- A. CHECK FOR SET (Triplets/Quads: same rank, different suits) ---
-  if (
-    actualCards.length > 0 &&
-    actualCards.every((c) => c.rank === actualCards[0].rank)
-  ) {
-    // Check suits: must be different for actual cards (Jokers don't affect suit check)
-    const suitSet = new Set(actualCards.map((c) => c.suit));
-    // Must have unique suits among non-jokers, AND total cards <= 4 (Triplets/Quads rule)
-    if (suitSet.size === actualCards.length && len <= 4) {
-      return { valid: true, type: "set" };
-    }
-  }
-
-  // --- B. CHECK FOR SEQUENCE ---
-  // Sequences must all be the same suit among non-Joker cards.
-  const suits = actualCards.map((c) => c.suit).filter(Boolean);
-  if (suits.length > 0 && new Set(suits).size !== 1) {
-    // If actual cards are mixed suits, it cannot be a sequence
-    return { valid: false, type: null };
-  }
-
-  // Sort actual cards by rank order
-  const sortedCards = [...actualCards].sort(
-    (a, b) => RANK_ORDER.indexOf(a.rank) - RANK_ORDER.indexOf(b.rank)
-  );
-
-  // Calculate required Jokers to fill gaps
-  let requiredJokers = 0;
-  for (let i = 0; i < sortedCards.length - 1; i++) {
-    const currentRank = RANK_ORDER.indexOf(sortedCards[i].rank);
-    const nextRank = RANK_ORDER.indexOf(sortedCards[i + 1].rank);
-
-    const rankDiff = nextRank - currentRank;
-
-    if (rankDiff === 1) {
-      continue; // Consecutive
-    } else if (rankDiff > 1) {
-      requiredJokers += rankDiff - 1; // Gap needs filling
-    } else {
-      return { valid: false, type: null }; // Duplicate rank in sequence is invalid
-    }
-  }
-
-  // Can the Jokers fill the gaps?
-  if (requiredJokers <= jokerCount) {
-    // Sequence is valid
-    const sequenceType = jokerCount === 0 ? "pure" : "impure";
-    return { valid: true, type: sequenceType };
-  }
-
-  return { valid: false, type: null };
-}
-
-/**
- * Main validation for Rummy declaration (1 Pure + 1 Second Sequence).
- */
-function isValidRummyDeclaration(groups, specialJoker) {
-  let hasPureSequence = false;
-  let hasSecondSequence = false; // Tracks the second required sequence
-
-  // Track total cards placed in valid groups
-  let totalCardsInGroups = 0;
-
-  for (const group of groups) {
-    if (group.length === 0) continue;
-
-    totalCardsInGroups += group.length;
-
-    const { valid, type } = checkGroupValidity(group, specialJoker);
-
-    if (!valid) {
-      // Rule: All groups must be valid (Sequences or Sets).
-      return false;
-    }
-
-    if (type === "pure") {
-      // A pure sequence can fulfill either requirement.
-      if (!hasPureSequence) {
-        hasPureSequence = true;
-      } else if (!hasSecondSequence) {
-        hasSecondSequence = true;
-      }
-    }
-
-    if (type === "impure") {
-      // An impure sequence fulfills the second sequence requirement.
-      if (!hasSecondSequence && hasPureSequence) {
-        hasSecondSequence = true;
-      }
-    }
-  }
-
-  // The final card must have been discarded, meaning the remaining 13 cards
-  // must be in the groups, and the hand must be empty.
-
-  // Final Check:
-  // 1. Must have exactly 13 cards distributed in groups (if hand is empty).
-  // 2. Both sequence requirements must be met.
-  return totalCardsInGroups === 13 && hasPureSequence && hasSecondSequence;
-}
 
 function createDeck() {
   const deck = [];
@@ -180,6 +63,9 @@ const room = {
   turn: 0,
   specialJoker: null,
   groups: [[], []],
+  // Add winner and state to track game status
+  state: "waiting", // 'waiting', 'playing', 'game_over'
+  winner: null,
 };
 
 function send(ws, msg) {
@@ -210,21 +96,22 @@ function startGame() {
   }
 
   // Reveal Special Joker from middle
+  // Note: We use the middle card as the special Joker, but leave it in the deck.
   const middleIndex = Math.floor(deck.length / 2);
   const specialJoker = deck[middleIndex];
-  // Note: Usually we leave the joker in the deck or set it aside.
-  // Your current logic leaves it in deck[middleIndex]. That is fine.
 
-  // --- FIX: Open one card to start the Discard Pile ---
+  // Open one card to start the Discard Pile
   const firstOpenCard = deck.pop();
   const discardPile = [firstOpenCard];
 
   room.deck = deck;
   room.hands = hands;
-  room.discardPile = discardPile; // Set the pile
+  room.discardPile = discardPile;
   room.turn = 0;
   room.specialJoker = specialJoker;
   room.groups = [[], []];
+  room.state = "playing";
+  room.winner = null;
 
   broadcastToPlayers({
     type: "game_start",
@@ -247,20 +134,125 @@ function broadcastState() {
   });
 }
 
-function validateGroups(groups) {
-  let hasPure = false;
-  let hasDummy = false;
+/**
+ * Checks if a group is a valid Set or Sequence (includes Ace wrap-around fix).
+ * Returns { valid: boolean, type: 'pure' | 'impure' | 'set' | null }
+ */
+function checkGroupValidity(group, specialJoker) {
+  const len = group.length;
+  if (len < 3) return { valid: false, type: null };
 
-  groups.forEach((g) => {
-    if (!Array.isArray(g)) return;
-    if (g.length < 3) return;
-    const nonJoker = g.filter((c) => c.rank !== "JOKER");
-    const suits = nonJoker.map((c) => c.suit).filter(Boolean);
-    if (suits.length > 0 && new Set(suits).size === 1) hasPure = true;
-    else hasDummy = true;
-  });
+  // Identify Jokers: includes two printed Jokers and the Special Joker rank
+  const isJoker = (card) =>
+    card.rank === "JOKER" ||
+    (specialJoker &&
+      card.rank === specialJoker.rank &&
+      card.suit !== specialJoker.suit);
 
-  return hasPure && hasDummy;
+  const jokers = group.filter(isJoker);
+  const jokerCount = jokers.length;
+  const actualCards = group.filter((c) => !isJoker(c));
+
+  // --- A. CHECK FOR SET (Triplets/Quads: same rank, different suits) ---
+  if (
+    actualCards.length > 0 &&
+    actualCards.every((c) => c.rank === actualCards[0].rank)
+  ) {
+    const suitSet = new Set(actualCards.map((c) => c.suit));
+    // Check for unique suits among non-jokers and group size <= 4
+    if (suitSet.size === actualCards.length && len <= 4) {
+      return { valid: true, type: "set" };
+    }
+  }
+
+  // --- B. CHECK FOR SEQUENCE ---
+  // Sequences must all be the same suit among non-Joker cards.
+  const suits = actualCards.map((c) => c.suit).filter(Boolean);
+  if (suits.length > 0 && new Set(suits).size !== 1) {
+    return { valid: false, type: null };
+  }
+
+  // Sort actual cards by rank order
+  const sortedCards = [...actualCards].sort(
+    (a, b) => RANK_ORDER.indexOf(a.rank) - RANK_ORDER.indexOf(b.rank)
+  );
+
+  let requiredJokers = 0;
+
+  // Map card ranks to numerical index (0-12) and handle the Q-K-A wrap-around
+  const ranksToCheck = sortedCards.map((c) => RANK_ORDER.indexOf(c.rank));
+
+  // Check if Q, K, A are present to activate Ace high logic
+  const hasQ = sortedCards.some((c) => c.rank === "Q");
+  const hasK = sortedCards.some((c) => c.rank === "K");
+  const hasA = sortedCards.some((c) => c.rank === "A");
+
+  // If Q, K, A are present, temporarily treat Ace's index (0) as 13 for sorting/diff
+  const adjustedRanks = ranksToCheck
+    .map((rankIndex) => (rankIndex === 0 && hasQ && hasK ? 13 : rankIndex))
+    .sort((a, b) => a - b);
+
+  // Calculate required Jokers based on consecutive ranks
+  for (let i = 0; i < adjustedRanks.length - 1; i++) {
+    const rankDiff = adjustedRanks[i + 1] - adjustedRanks[i];
+
+    if (rankDiff === 1) {
+      continue; // Consecutive
+    } else if (rankDiff > 1) {
+      requiredJokers += rankDiff - 1; // Gap needs filling
+    } else {
+      return { valid: false, type: null }; // Duplicates or invalid order
+    }
+  }
+
+  // Can the Jokers fill the gaps?
+  if (requiredJokers <= jokerCount) {
+    // Sequence is valid
+    const sequenceType = jokerCount === 0 ? "pure" : "impure";
+    return { valid: true, type: sequenceType };
+  }
+
+  return { valid: false, type: null };
+}
+
+/**
+ * Main validation for Rummy declaration (1 Pure + 1 Second Sequence, total 13 cards).
+ */
+function isValidRummyDeclaration(groups, specialJoker) {
+  let hasPureSequence = false;
+  let hasSecondSequence = false;
+  let totalCardsInGroups = 0;
+
+  for (const group of groups) {
+    if (group.length === 0) continue;
+
+    totalCardsInGroups += group.length;
+
+    const { valid, type } = checkGroupValidity(group, specialJoker);
+
+    if (!valid) {
+      return false;
+    }
+
+    if (type === "pure") {
+      if (!hasPureSequence) {
+        hasPureSequence = true;
+      } else if (!hasSecondSequence) {
+        hasSecondSequence = true;
+      }
+    }
+
+    if (type === "impure") {
+      if (!hasSecondSequence && hasPureSequence) {
+        hasSecondSequence = true;
+      }
+    }
+  }
+
+  // Final Check:
+  // 1. Total 13 cards must be distributed in groups.
+  // 2. Both mandatory sequence requirements must be met.
+  return totalCardsInGroups === 13 && hasPureSequence && hasSecondSequence;
 }
 
 const wss = new WebSocket.Server({ port: 8080 }, () =>
@@ -297,9 +289,11 @@ wss.on("connection", (ws) => {
     const pi = ws.playerIndex;
     if (pi === undefined || pi === null) return;
 
+    // Game state check
+    if (room.state !== "playing" && msg.type !== "join_room") return;
+
     switch (msg.type) {
       case "draw": {
-        // enforce turn
         if (room.turn !== pi) return;
         if (!room.deck || room.deck.length === 0) return;
         const card = room.deck.pop();
@@ -310,29 +304,30 @@ wss.on("connection", (ws) => {
 
       case "pick_discard": {
         if (room.turn !== pi) return;
-        // The check below ensures the player is in the 'draw' phase.
         if (room.hands[pi].length !== 13) return;
         if (room.discardPile.length === 0) return;
 
-        // 1. Take the top card from the discard pile
         const card = room.discardPile.shift();
-
-        // 2. Add it to the player's hand
         room.hands[pi].push(card);
 
-        // 3. Broadcast new state
         broadcastState();
         break;
       }
 
       case "discard": {
         if (room.turn !== pi) return;
+        // Must discard only when the player has 14 cards (after drawing)
+        if (room.hands[pi].length !== 14) return;
+
         const cardId = (msg.card && msg.card.id) || msg.cardId;
         if (!cardId) return;
+
         const idx = room.hands[pi].findIndex((c) => c.id === cardId);
         if (idx === -1) return;
+
         const [card] = room.hands[pi].splice(idx, 1);
         room.discardPile.unshift(card);
+
         // pass turn
         room.turn = room.turn === 0 ? 1 : 0;
         broadcastState();
@@ -340,6 +335,7 @@ wss.on("connection", (ws) => {
       }
 
       case "group": {
+        // Player is synchronizing groups as they organize.
         if (Array.isArray(msg.groups)) {
           room.groups[pi] = msg.groups;
         }
@@ -348,11 +344,12 @@ wss.on("connection", (ws) => {
       }
 
       case "reorder": {
-        // "Soft" reorder: Sorts what is already in hand.
-        // If cards are missing from the list, it appends them.
+        // Used for sorting cards already in hand.
         if (!Array.isArray(msg.order)) break;
+
         const map = {};
         room.hands[pi].forEach((c) => (map[c.id] = c));
+
         const newHand = [];
         msg.order.forEach((id) => {
           if (map[id]) {
@@ -360,7 +357,8 @@ wss.on("connection", (ws) => {
             delete map[id];
           }
         });
-        // append any remaining cards
+
+        // append any remaining cards (shouldn't happen if client sends full list)
         Object.values(map).forEach((c) => newHand.push(c));
         room.hands[pi] = newHand;
         broadcastState();
@@ -368,6 +366,7 @@ wss.on("connection", (ws) => {
       }
 
       case "move_group_to_hand": {
+        // Permanent fix for card retrieval from Group to Hand.
         if (
           !msg.cardId ||
           typeof msg.fromGroupIndex !== "number" ||
@@ -380,30 +379,24 @@ wss.on("connection", (ws) => {
 
         // 1. Find the card object in the specified group.
         const group = room.groups[pi][fromGroupIndex];
-        if (!group) return; // Group doesn't exist
+        if (!group) return;
 
         const cardIndexInGroup = group.findIndex((c) => c.id === cardId);
         if (cardIndexInGroup === -1) {
-          // This is a crucial anti-cheat check: does the card really exist in that group?
           console.warn(
             `Card ID ${cardId} not found in Group ${fromGroupIndex} for Player ${pi}.`
           );
           return;
         }
 
-        // 2. Perform the atomic move on the server state:
-        // a) Remove card from the group
+        // 2. Perform the atomic move:
         const [cardToMove] = group.splice(cardIndexInGroup, 1);
 
-        // b) Reconstruct the new Hand based on the order sent by the client (msg.toHandOrder).
-        // This is where we need to ensure the cardToMove is correctly inserted.
-
-        // Pool of all cards owned by player (Hand + Groups)
-        // IMPORTANT: The cardToMove is currently NOT in room.groups, but we have the object.
+        // 3. Reconstruct the new Hand using a verified inventory pool.
         const totalInventory = [
           ...room.hands[pi],
           ...room.groups[pi].flat(),
-          cardToMove,
+          cardToMove, // Include the card being moved
         ];
         const inventoryMap = new Map(totalInventory.map((c) => [c.id, c]));
 
@@ -412,27 +405,20 @@ wss.on("connection", (ws) => {
           const cardObject = inventoryMap.get(id);
           if (cardObject) {
             newHand.push(cardObject);
-            // Remove from map to prevent duplicates (essential anti-cheat)
             inventoryMap.delete(id);
           }
         });
 
-        // 3. Update the player's hand and groups state on the server
+        // 4. Update the player's hand and groups state on the server
         room.hands[pi] = newHand;
-
-        // 4. Broadcast the new game state
         broadcastState();
         break;
       }
 
       case "sync_hand": {
-        // This is now primarily used only for reordering.
+        // Used for client-initiated hand updates, mostly reordering.
         if (!Array.isArray(msg.hand)) break;
 
-        // Pool of all cards owned by player (Hand + Groups)
-        // NOTE: This pool now correctly omits the card that was moved
-        // to the hand via 'move_group_to_hand', as the card is already
-        // established in room.hands[pi] by that prior, atomic handler.
         const totalInventory = [...room.hands[pi], ...room.groups[pi].flat()];
         const inventoryMap = new Map(totalInventory.map((c) => [c.id, c]));
 
@@ -440,7 +426,7 @@ wss.on("connection", (ws) => {
         msg.hand.forEach((id) => {
           if (inventoryMap.has(id)) {
             verifiedHand.push(inventoryMap.get(id));
-            inventoryMap.delete(id); // Prevent duplicates (Anti-cheat)
+            inventoryMap.delete(id);
           }
         });
 
@@ -450,24 +436,48 @@ wss.on("connection", (ws) => {
       }
 
       case "declare": {
-        const valid = validateGroups(room.groups[pi] || []);
-        if (valid) {
+        if (room.turn !== pi) return;
+
+        // 1. Check game requirement: Hand must be empty (13 cards must be arranged in groups).
+        if (room.hands[pi].length !== 0) {
+          send(ws, { type: "invalid_declare" });
+          console.warn(`Player ${pi} declared with cards left in hand.`);
+          return;
+        }
+
+        // 2. Check group validity (includes the 13 card count check and Two-Sequence rule)
+        const isValid = isValidRummyDeclaration(
+          room.groups[pi] || [],
+          room.specialJoker
+        );
+
+        if (isValid) {
+          // WIN CONDITION MET
+          room.state = "game_over";
+          room.winner = pi;
+
           broadcast({ type: "win", winner: pi });
+
+          // Reset game state for cleanup / next game
+          room.hands = [[], []];
+          room.deck = [];
+          room.discardPile = [];
+          room.turn = 0;
+          room.groups = [[], []];
+          room.specialJoker = null;
+
           if (room.players.length === 2) {
-            startGame();
+            // startGame(); // If you want an immediate restart
           } else {
-            room.hands = [[], []];
-            room.deck = [];
-            room.discardPile = [];
-            room.turn = 0;
-            room.groups = [[], []];
-            room.specialJoker = null;
             broadcast({ type: "players", players: room.players.length });
           }
         } else {
+          // INVALID DECLARATION: Penalty is to pass the turn.
+          send(ws, { type: "invalid_declare" });
+          console.log(`Player ${pi} declared invalidly.`);
+
           room.turn = room.turn === 0 ? 1 : 0;
           broadcastState();
-          send(ws, { type: "invalid_declare" });
         }
         break;
       }
@@ -480,12 +490,17 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     const leftSlot = ws.playerIndex;
     room.players = room.players.filter((p) => p.ws !== ws);
+
+    // Reset state fully if a player leaves
     room.hands = [[], []];
     room.deck = [];
     room.discardPile = [];
     room.turn = 0;
     room.groups = [[], []];
     room.specialJoker = null;
+    room.state = "waiting";
+    room.winner = null;
+
     broadcast({ type: "players", players: room.players.length });
     broadcast({ type: "player_left", slot: leftSlot });
   });

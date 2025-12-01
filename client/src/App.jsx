@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+} from "react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 
 const CARD_ITEM = "CARD";
+// Corrected Suit order: Spades, Hearts, Diamonds, Clubs
 const SUIT_ORDER = ["♠", "♥", "♦", "♣"];
 const RANK_ORDER = [
   "A",
@@ -21,71 +28,112 @@ const RANK_ORDER = [
   "JOKER",
 ];
 
-function CardView({ card, onClick, isJoker, style }) {
+// --- Style Constants ---
+const PRIMARY_COLOR = "#1d4ed8"; // Blue-700
+const SUCCESS_COLOR = "#10b981"; // Green-600
+const WARNING_COLOR = "#f59e0b"; // Yellow-600
+const BACKGROUND_COLOR = "#f9fafb"; // Gray-50
+const CARD_WIDTH = "52px";
+const CARD_HEIGHT = "72px";
+const BORDER_RADIUS = "0.5rem";
+
+// Helper for common styles
+const styles = {
+  cardBase: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "8px",
+    borderRadius: BORDER_RADIUS,
+    boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+    transition: "all 0.15s ease-in-out",
+    userSelect: "none",
+    width: CARD_WIDTH,
+    height: CARD_HEIGHT,
+    textAlign: "center",
+    fontFamily: "Inter, sans-serif",
+  },
+  sectionCard: {
+    padding: "1rem",
+    borderRadius: "0.75rem",
+    boxShadow:
+      "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+    backgroundColor: "#ffffff",
+    border: "1px solid #e5e7eb",
+  },
+  buttonBase: {
+    padding: "8px 16px",
+    borderRadius: "0.5rem",
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+    transition: "all 0.15s",
+    cursor: "pointer",
+    fontWeight: "500",
+    border: "none",
+  },
+  waitingBox: {
+    margin: "40px auto",
+    padding: "32px",
+    textAlign: "center",
+    borderRadius: "1rem",
+    backgroundColor: "#ffffff",
+    boxShadow:
+      "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+    maxWidth: "500px",
+  },
+};
+// -----------------------
+
+function CardView({ card, onClick, isJoker, isSpecialJoker, style }) {
   if (!card) return null;
+
+  const isRedSuit = card.suit === "♥" || card.suit === "♦";
+  const suitColor = isRedSuit ? "#dc2626" : "#1f2937"; // Red-600 or Gray-900
+
+  let cardStyle = {
+    ...styles.cardBase,
+    border: "1px solid #d1d5db", // Gray-300
+    backgroundColor: "#ffffff",
+  };
+
+  if (isJoker) {
+    cardStyle = {
+      ...cardStyle,
+      border: "2px solid #f97316", // Orange-500
+      backgroundColor: "#fffbeb", // Yellow-50
+    };
+  }
+  if (isSpecialJoker) {
+    cardStyle = {
+      ...cardStyle,
+      border: "4px solid #10b981", // Green-500
+      backgroundColor: "#d1fae5", // Green-100
+    };
+  }
+
   return (
     <div
       onClick={onClick}
       style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 8,
-        border: isJoker ? "2px solid orange" : "1px solid #ccc",
-        borderRadius: 8,
+        ...cardStyle,
         cursor: onClick ? "pointer" : "default",
-        width: 52, // Fixed width to prevent collapsing
-        height: 72, // Fixed height
-        textAlign: "center",
-        background: "#fff",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-        userSelect: "none",
         ...style,
       }}
     >
-      <div style={{ fontWeight: 700, fontSize: 16 }}>{card.rank}</div>
-      <div style={{ fontSize: 18, lineHeight: 1 }}>{card.suit}</div>
-      {isJoker && <div style={{ fontSize: 12 }}>★</div>}
+      <div style={{ fontWeight: "bold", fontSize: "16px", color: suitColor }}>
+        {card.rank}
+      </div>
+      <div style={{ fontSize: "20px", lineHeight: "1", color: suitColor }}>
+        {card.suit}
+      </div>
+      {(isJoker || isSpecialJoker) && (
+        <div style={{ fontSize: "10px", fontWeight: "600" }}>★ JOKER</div>
+      )}
     </div>
   );
 }
 
-// function DraggableDiscardCard({ card, canDrag, send }) {
-//   const [{ isDragging }, dragRef] = useDrag({
-//     type: CARD_ITEM,
-//     item: { card, fromGroup: "discard", index: 0 },
-//     canDrag: canDrag, // Set based on canPlay and hand.length === 13
-//     collect: (monitor) => ({
-//       isDragging: monitor.isDragging(),
-//     }),
-//   });
-
-//   return (
-//     <div
-//       ref={dragRef}
-//       style={{
-//         opacity: isDragging ? 0.35 : 1,
-//         cursor: canDrag ? "grab" : "default",
-//         transform: isDragging ? "scale(1.04)" : "none",
-//         transition: "transform 120ms ease, opacity 120ms ease",
-//       }}
-//     >
-//       <CardView
-//         card={card}
-//         isJoker={card.rank === "JOKER"}
-//         // This click handler is for fallback/non-DND picking
-//         onClick={() => {
-//           if (canDrag) send({ type: "pick_discard" });
-//         }}
-//       />
-//     </div>
-//   );
-// }
-
-/* DraggableCard 
-  Added 'style' prop so parent components (Bucket) can control margins 
-*/
+/* DraggableCard */
 function DraggableCard({
   card,
   fromGroup = null,
@@ -93,7 +141,12 @@ function DraggableCard({
   onClick,
   onDropToHand,
   style = {},
+  specialJokerCard,
 }) {
+  const isSpecialJoker =
+    specialJokerCard && card.rank === specialJokerCard.rank;
+  const isPrintedJoker = card.rank === "JOKER";
+
   const [{ isDragging }, dragRef] = useDrag({
     type: CARD_ITEM,
     item: { card, fromGroup, index },
@@ -105,20 +158,19 @@ function DraggableCard({
   const [, dropRef] = useDrop({
     accept: CARD_ITEM,
     drop: (item) => {
-      // 1. Hand Reorder
-      if (
-        item.fromGroup === null &&
-        fromGroup === null &&
-        typeof item.index === "number" &&
-        typeof index === "number"
-      ) {
+      // Hand Reorder
+      if (item.fromGroup === null && fromGroup === null) {
         if (item.index !== index) {
-          onDropToHand(item.index, index);
+          onDropToHand({ fromHandIndex: item.index, toHandIndex: index });
         }
       }
-      // 2. Group -> Hand (Dropped ON TOP of a card)
+      // Group -> Hand (Dropped ON TOP of a card, which sets the index for insertion)
       else if (item.fromGroup !== null && fromGroup === null) {
-        onDropToHand(item.fromGroup, index, item.card);
+        onDropToHand({
+          fromGroupIndex: item.fromGroup,
+          toHandIndex: index,
+          card: item.card,
+        });
       }
       return undefined;
     },
@@ -136,31 +188,38 @@ function DraggableCard({
     <div
       ref={attachRef}
       style={{
-        // FIX: inline-block ensures it sits nicely in the Bucket row
         display: "inline-block",
+        transition: "transform 0.12s",
         opacity: isDragging ? 0.35 : 1,
-        transform: isDragging ? "scale(1.04)" : "none",
-        transition: "transform 120ms ease, opacity 120ms ease",
-        verticalAlign: "top", // Aligns cards in bucket
+        cursor: "grab",
+        verticalAlign: "top",
+        margin: "0",
         ...style,
       }}
     >
-      <CardView card={card} isJoker={card.rank === "JOKER"} onClick={onClick} />
+      <CardView
+        card={card}
+        isJoker={isPrintedJoker}
+        isSpecialJoker={isSpecialJoker}
+        onClick={onClick}
+      />
     </div>
   );
 }
 
-/* HandSlot */
+/* HandSlot - Drop target between cards in hand for insertion */
 function HandSlot({ targetIndex, onDropHere }) {
   const [{ isOver }, dropRef] = useDrop({
     accept: CARD_ITEM,
     drop: (item) => {
       if (item.fromGroup === null) {
+        // Drop from hand to hand (reorder)
         onDropHere({
           fromHandIndex: item.index,
           toHandIndex: targetIndex,
         });
       } else {
+        // Drop from group to hand (insertion)
         onDropHere({
           fromGroupIndex: item.fromGroup,
           toHandIndex: targetIndex,
@@ -175,24 +234,24 @@ function HandSlot({ targetIndex, onDropHere }) {
     <div
       ref={dropRef}
       style={{
-        width: 12,
-        height: 72,
-        margin: "0 2px",
+        width: "12px",
+        height: CARD_HEIGHT,
+        margin: "0 4px", // mx-1
         display: "inline-block",
-        background: isOver ? "rgba(0,0,255,0.1)" : "transparent",
-        borderRadius: 4,
         verticalAlign: "middle",
+        borderRadius: "2px",
+        flexShrink: 0,
+        background: isOver ? "rgba(37, 99, 235, 0.2)" : "transparent", // Blue-500 hover
       }}
     />
   );
 }
 
-/* Bucket */
-function Bucket({ cards, index, addCard }) {
+/* Bucket - Grouping Area */
+function Bucket({ cards, index, addCard, specialJoker }) {
   const [{ isOver }, dropRef] = useDrop({
     accept: CARD_ITEM,
     drop: (item) => {
-      console.log("I m, here", item);
       if (item.fromGroup === index) return;
       addCard(item.card, item.fromGroup, index);
     },
@@ -203,43 +262,42 @@ function Bucket({ cards, index, addCard }) {
     <div
       ref={dropRef}
       style={{
-        minWidth: 140,
-        minHeight: 100,
-        border: `2px dashed ${isOver ? "#40a9ff" : "#ccc"}`,
-        margin: "0 8px 8px 0",
-        padding: 8,
-        borderRadius: 8,
-        background: isOver ? "#f0fbff" : "#fafafa",
+        minWidth: "144px", // min-w-36
+        minHeight: "96px", // min-h-24
+        padding: "8px",
+        borderRadius: "0.75rem",
+        margin: "8px",
+        boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.06)", // shadow-inner
         transition: "all 0.2s",
-        // Flex container controls layout
         display: "flex",
         flexWrap: "wrap",
         alignContent: "flex-start",
-        gap: 4, // Handles spacing between cards
+        gap: "4px",
+        border: isOver ? "2px solid #3b82f6" : "2px dashed #d1d5db", // Blue-500 or Gray-300
+        backgroundColor: isOver ? "#eff6ff" : "#f3f4f6", // Blue-50 or Gray-100 (Conditional is the correct one)
       }}
     >
       {cards.length === 0 ? (
         <div
           style={{
-            color: "#999",
+            color: "#6b7280",
             width: "100%",
             textAlign: "center",
-            marginTop: 30,
+            marginTop: "24px",
+            fontSize: "14px",
           }}
         >
-          Drop Group
+          Drop Group Here
         </div>
       ) : (
         cards.map((c, idx) => (
-          // FIX: Pass margin via style directly to DraggableCard
-          // Removed redundant wrapping <div> which was breaking flex layout
           <DraggableCard
             key={c.id}
             card={c}
             fromGroup={index}
             index={idx}
             onDropToHand={() => {}}
-            style={{ margin: 0 }}
+            specialJokerCard={specialJoker}
           />
         ))
       )}
@@ -253,131 +311,261 @@ export default function App() {
   const [playerIndex, setPlayerIndex] = useState(null);
   const [playersConnected, setPlayersConnected] = useState(0);
   const [gameStarted, setGameStarted] = useState(false);
-  const [gameOver, setGameOver] = useState(false);
 
   const [hand, setHand] = useState([]);
   const [deckCount, setDeckCount] = useState(0);
   const [discardPile, setDiscardPile] = useState([]);
   const [groups, setGroups] = useState([[], [], [], []]);
 
-  const [turn, setTurn] = useState(0);
+  const [turn, setTurn] = useState(null);
   const [specialJoker, setSpecialJoker] = useState(null);
+  const [gameMessage, setGameMessage] = useState(null);
 
+  const totalCardsInGroups = useMemo(() => groups.flat().length, [groups]);
+
+  // Custom function to render the turn status text
+  const renderTurnStatus = useCallback(() => {
+    if (playerIndex === null) {
+      return "Waiting for assignment...";
+    }
+
+    if (turn === null || !gameStarted) {
+      return "Game starting...";
+    }
+
+    if (turn === playerIndex) {
+      return "YOUR TURN";
+    } else if (turn >= 0) {
+      // Display the correct opponent player number (index + 1)
+      return `Player ${turn + 1}'s Turn`;
+    }
+
+    return "Waiting...";
+  }, [playerIndex, turn, gameStarted]);
+
+  // Reset function to clear state fully upon game reset/player leave
+  const resetGameState = useCallback(() => {
+    setGameStarted(false);
+    setHand([]);
+    setDeckCount(0);
+    setDiscardPile([]);
+    setGroups([[], [], [], []]);
+    setTurn(null);
+    setSpecialJoker(null);
+  }, []);
+
+  // --- CRITICAL FIX: Added 'gameStarted' to dependency array ---
+  // This forces the effect to rerun and create a new, fresh onmessage closure
+  // that holds the latest 'gameStarted' value whenever the game state flips.
   useEffect(() => {
+    // --- WebSocket Connection ---
+    // NOTE: This URL must match your WebSocket server instance (e.g., ws://localhost:8080).
     const ws = new WebSocket("ws://localhost:8080");
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "join_room", room: "table-1" }));
+      console.log("[WS] Connected. Joining room.");
+      ws.send(
+        JSON.stringify({
+          type: "join_room",
+          room: "table-1",
+          playerId: playerIndex,
+        })
+      );
     };
 
     ws.onmessage = (evt) => {
       const msg = JSON.parse(evt.data);
 
       if (msg.type === "assigned") {
-        setPlayerIndex(msg.player);
+        const assignedPlayerIndex = msg.player;
+        setPlayerIndex(assignedPlayerIndex);
         setPlayersConnected(msg.players || 1);
+        console.log(`[CLIENT ASSIGNED] Player Index: ${assignedPlayerIndex}`);
       }
+
       if (msg.type === "players") {
         setPlayersConnected(msg.players || 0);
+        if (!gameStarted && msg.players === 2) {
+          setGameMessage("2 players connected. Game ready to start.");
+        }
       }
-      if (msg.type === "player_left") {
-        alert(`Player ${msg.slot + 1} left`);
-        setGameStarted(false);
-        setHand([]);
-        setDeckCount(0);
-        setDiscardPile([]);
-        setGroups([[], [], [], []]);
 
-        setTurn(0);
-        setSpecialJoker(null);
+      if (msg.type === "player_left") {
+        setGameMessage(`Player ${msg.slot + 1} left. Game reset.`);
+        resetGameState(); // Reset all game state
       }
+
       if (msg.type === "game_start") {
+        console.log(
+          "[SERVER] Game Start Message Received. Setting gameStarted=true."
+        );
+
+        // --- Set Initial Game State ---
+        // Setting gameStarted=true here immediately makes the component re-render
+        // with the game board, and the next onmessage closure (if triggered) will
+        // have the correct value.
         setGameStarted(true);
-        setGameOver(false);
+        setGameMessage(null);
         setSpecialJoker(msg.specialJoker || null);
         setDeckCount(msg.deckCount || 0);
         setDiscardPile(msg.discardPile || []);
-        setTurn(msg.turn || 0);
         setGroups([[], [], [], []]);
+        setPlayersConnected(msg.numPlayers || 2);
 
-        const idx =
-          typeof msg.playerIndex === "number"
-            ? msg.playerIndex
-            : msg.playerIndex;
-        if (msg.hands && typeof idx === "number") {
-          setHand(msg.hands[idx] || []);
+        if (typeof msg.turn === "number") {
+          setTurn(msg.turn);
+        } else {
+          setTurn(0);
+        }
+
+        if (
+          typeof playerIndex === "number" &&
+          msg.hands &&
+          msg.hands[playerIndex]
+        ) {
+          setHand(msg.hands[playerIndex]);
         } else {
           setHand([]);
         }
       }
+
       if (msg.type === "update") {
-        setDeckCount(msg.deckCount || 0);
-        setDiscardPile(msg.discardPile || []);
-        setTurn(typeof msg.turn === "number" ? msg.turn : turn);
+        if (typeof playerIndex === "number") {
+          const currentPlayerIndex = playerIndex;
 
-        const playerGroups = msg.groups[playerIndex];
-        if (playerGroups && Array.isArray(playerGroups)) {
-          setGroups(playerGroups); // Use the player's groups directly
-        }
+          console.log(
+            "[SERVER UPDATE] Received state for P" + (currentPlayerIndex + 1),
+            {
+              deckCount: msg.deckCount,
+              turn: msg.turn,
+              // We check the closure's value here:
+              gameStartedInClosure: gameStarted,
+            }
+          );
 
-        if (typeof msg.playerIndex === "number" && msg.hands) {
-          setHand(msg.hands[msg.playerIndex] || []);
-        } else if (msg.hands && typeof playerIndex === "number") {
-          setHand(msg.hands[playerIndex] || []);
+          // Authoritative state update for shared variables
+          setDeckCount(msg.deckCount || 0);
+          setDiscardPile(msg.discardPile || []);
+          setPlayersConnected(msg.numPlayers || playersConnected);
+
+          if (typeof msg.turn === "number") {
+            setTurn(msg.turn);
+          }
+
+          // CRITICAL FIX: The check below ensures we only update HAND/GROUPS if
+          // the UI is actually supposed to be showing the game board.
+          if (gameStarted) {
+            // Now uses the fresh 'gameStarted' value thanks to dependency array
+            const currentGroups = msg.groups?.[currentPlayerIndex];
+            if (currentGroups && Array.isArray(currentGroups)) {
+              setGroups(currentGroups);
+            }
+
+            const currentHand = msg.hands?.[currentPlayerIndex];
+            if (currentHand) {
+              setHand(currentHand);
+            }
+            setGameMessage(null);
+          }
         }
       }
+
       if (msg.type === "win") {
-        alert(`Player ${msg.winner + 1} wins!`);
-        setGameOver(true);
+        setGameMessage(
+          `Player ${msg.winner + 1} wins! Game will restart shortly.`
+        );
         setGameStarted(false);
+        setTurn(null);
       }
+
       if (msg.type === "invalid_declare") {
-        alert("Server says: invalid declaration.");
+        setGameMessage(
+          "Invalid declaration! Check your groups (1 Pure + 1 Dummy required). Turn passed."
+        );
+      }
+
+      if (msg.type === "error") {
+        setGameMessage(`Server Error: ${msg.error}`);
       }
     };
 
+    // Dependencies: Crucially includes gameStarted, playerIndex, and resetGameState
+    // to ensure the onmessage handler always has the latest state/functions.
     return () => {
       try {
-        ws.close();
+        if (wsRef.current) {
+          wsRef.current.close();
+        }
       } catch (e) {
         console.log(e);
       }
     };
-  }, []);
+  }, [playerIndex, gameStarted, resetGameState]); // <<< Dependency Array Fix
 
   const send = (payload) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.warn("WebSocket not open. Cannot send payload:", payload);
+      setGameMessage("Error: Connection lost. Please refresh.");
+      return;
+    }
     wsRef.current.send(JSON.stringify(payload));
   };
 
-  const canPlay =
-    gameStarted && !gameOver && playersConnected === 2 && playerIndex === turn;
+  // Turn checks for control flow
+  const isMyTurn = playerIndex !== null && turn === playerIndex;
+  const canPlay = gameStarted && playersConnected === 2 && isMyTurn;
+  const isReadyToDiscard = hand.length === 14;
+  const isReadyToDeclare = canPlay && hand.length === 1;
 
   const onDraw = () => {
-    if (!canPlay) return alert("Not your turn");
+    if (!canPlay) return setGameMessage("Not your turn!");
+    if (hand.length !== 13)
+      return setGameMessage(
+        "You must discard a card before drawing again, or you already drew this turn."
+      );
     send({ type: "draw" });
   };
 
-  const onDiscard = (card) => {
-    if (!canPlay) return alert("Not your turn");
-    send({ type: "discard", card });
+  const onPickDiscard = () => {
+    if (!canPlay) return setGameMessage("Not your turn!");
+    if (hand.length !== 13)
+      return setGameMessage(
+        "You must have 13 cards in hand to draw from the discard pile."
+      );
+    send({ type: "pick_discard" });
   };
 
-  const reorderInHand = (fromIdx, toIdx) => {
-    if (fromIdx === toIdx) return;
+  const onDiscard = (card) => {
+    if (!canPlay) return setGameMessage("Not your turn!");
+    if (!isReadyToDiscard)
+      return setGameMessage(
+        "You must draw a card (14 cards total) before discarding."
+      );
+
+    // 1. Send action to server
+    send({ type: "discard", card });
+
+    // 2. Set a temporary message while waiting for the server update
+    setGameMessage(
+      `Discarding ${card.rank}${card.suit}. Waiting for opponent's turn...`
+    );
+  };
+
+  const reorderInHand = ({ fromHandIndex, toHandIndex }) => {
+    if (fromHandIndex === toHandIndex) return;
     const newHand = [...hand];
-    const [moving] = newHand.splice(fromIdx, 1);
-    newHand.splice(toIdx, 0, moving);
+    const [moving] = newHand.splice(fromHandIndex, 1);
+    newHand.splice(toHandIndex, 0, moving);
     setHand(newHand);
+    // Send updated hand order to server for persistence/sync
     send({ type: "reorder", order: newHand.map((c) => c.id) });
   };
 
   const addCardToGroup = (card, fromGroup, toGroup) => {
     const newGroups = groups.map((g) => [...g]);
 
-    // --- FIX 1: Explicitly handle removal from source group ---
-    if (fromGroup !== null) {
+    if (fromGroup !== null && fromGroup !== undefined) {
       const sourceGroupIndex = newGroups[fromGroup].findIndex(
         (c) => c.id === card.id
       );
@@ -385,268 +573,590 @@ export default function App() {
         newGroups[fromGroup].splice(sourceGroupIndex, 1);
       }
     }
-    console.log("toGroup", toGroup, newGroups);
-    // Add to target group
+
     newGroups[toGroup].push(card);
-    console.log(newGroups, "I am jhere 2");
     setGroups(newGroups);
 
-    // If from hand, remove from hand locally (This part was correct)
     let newHand = [...hand];
-    if (fromGroup === null) {
+    if (fromGroup === null || fromGroup === undefined) {
+      // Card moved from hand to group
       newHand = hand.filter((c) => c.id !== card.id);
       setHand(newHand);
-    }
-
-    // Sync everything
-    send({ type: "group", groups: newGroups });
-    if (fromGroup === null) {
       send({ type: "sync_hand", hand: newHand.map((c) => c.id) });
     }
+
+    // Send updated groups state
+    send({ type: "group", groups: newGroups });
   };
 
-  const addCardFromGroupToHandAt = (fromGroup, atIndex, card) => {
+  const addCardFromGroupToHandAt = ({ fromGroupIndex, toHandIndex, card }) => {
     const newGroups = groups.map((g) => [...g]);
-    newGroups[fromGroup] = newGroups[fromGroup].filter((c) => c.id !== card.id);
-    console.log("I ma here eaks", newGroups);
+
+    // Remove from group
+    newGroups[fromGroupIndex] = newGroups[fromGroupIndex].filter(
+      (c) => c.id !== card.id
+    );
     setGroups(newGroups);
 
+    // Add to hand
     const newHand = [...hand];
-    newHand.splice(atIndex, 0, card);
+    newHand.splice(toHandIndex, 0, card);
     setHand(newHand);
 
-    // send({ type: "group", groups: newGroups });
-    // send({ type: "sync_hand", hand: newHand.map((c) => c.id) });
+    // Sync state with server
     send({
       type: "move_group_to_hand",
       cardId: card.id,
-      fromGroupIndex: fromGroup,
-      toHandOrder: newHand.map((c) => c.id), // Send the full resulting hand order
+      fromGroupIndex: fromGroupIndex,
+      toHandOrder: newHand.map((c) => c.id),
+      groups: newGroups, // Send the updated groups array too
     });
   };
 
   const onDeclare = () => {
-    send({ type: "declare" });
+    if (!isReadyToDeclare) {
+      return setGameMessage(
+        "You must have exactly 1 card left in hand to declare (the final discard)."
+      );
+    }
+    // We send the current groups and the final discard (the card left in hand)
+    send({
+      type: "declare",
+      groups: groups,
+      finalDiscard: hand[0],
+    });
+    setGameMessage("Declaration sent to server for validation...");
   };
 
   const sortHand = () => {
     const sorted = [...hand].sort((a, b) => {
-      if (a.rank === "JOKER" && b.rank !== "JOKER") return 1;
-      if (b.rank === "JOKER" && a.rank !== "JOKER") return -1;
-      const rA = RANK_ORDER.indexOf(a.rank);
-      const rB = RANK_ORDER.indexOf(b.rank);
-      if (rA !== rB) return rA - rB;
+      // 1. Joker handling (Jokers always go to the end)
+      const isASpecialJoker = specialJoker && a.rank === specialJoker.rank;
+      const isBSpecialJoker = specialJoker && b.rank === specialJoker.rank;
+      const isAPrintedJoker = a.rank === "JOKER";
+      const isBPrintedJoker = b.rank === "JOKER";
+
+      const isAJoker = isASpecialJoker || isAPrintedJoker;
+      const isBJoker = isBSpecialJoker || isBPrintedJoker;
+
+      if (isAJoker && !isBJoker) return 1; // a is joker, b is not -> a comes later
+      if (isBJoker && !isAJoker) return -1; // b is joker, a is not -> b comes later
+      if (isAJoker && isBJoker) {
+        // If both are jokers, rely on their type (Printed/Special)
+        if (isAPrintedJoker && !isBPrintedJoker) return 1;
+        if (isBPrintedJoker && !isAPrintedJoker) return -1;
+        return 0;
+      }
+
+      // 2. Suit sorting (Suit is the primary sort key)
       const sA = SUIT_ORDER.indexOf(a.suit);
       const sB = SUIT_ORDER.indexOf(b.suit);
-      return sA - sB;
+      if (sA !== sB) return sA - sB;
+
+      // 3. Rank sorting (Rank is the secondary sort key)
+      const rA = RANK_ORDER.indexOf(a.rank);
+      const rB = RANK_ORDER.indexOf(b.rank);
+      return rA - rB;
     });
     setHand(sorted);
     send({ type: "reorder", order: sorted.map((c) => c.id) });
   };
 
+  // Logic to generate the opponent status message
+  const getOpponentStatusMessage = () => {
+    if (!gameStarted && playersConnected < 2)
+      return `Game is waiting for ${
+        2 - playersConnected
+      } more player(s) to start...`;
+
+    if (isMyTurn) {
+      if (hand.length === 14) {
+        return "You drew a card. Please discard one card to end your turn.";
+      }
+      if (hand.length === 13) {
+        return "It is your turn. Draw from the Deck or Pick Discard.";
+      }
+      if (hand.length === 1) {
+        return "You are ready to Declare! Group your cards and click Declare.";
+      }
+      return "It is your turn. Make your move.";
+    } else if (turn !== null && turn !== playerIndex) {
+      // If it's the opponent's turn, 'turn' holds the opponent's index.
+      const opponentPlayerNumber = turn + 1;
+      return `Waiting for Player ${opponentPlayerNumber} to finish their turn.`;
+    }
+    return "Waiting for game state...";
+  };
+
   return (
     <DndProvider backend={HTML5Backend}>
+      {/* Set width to 100% and overflowX: 'hidden' to prevent global scrollbar */}
       <div
         style={{
-          padding: 20,
-          fontFamily: "Inter, system-ui, Arial",
-          background: "#f4f4f4",
+          padding: "16px", // p-4
           minHeight: "100vh",
+          fontFamily: "Inter, sans-serif",
+          backgroundColor: BACKGROUND_COLOR,
+          color: "#1f2937", // Gray-800
+          width: "100%",
+          overflowX: "hidden",
         }}
       >
-        <h2 style={{ marginTop: 0 }}>13-Card Rummy</h2>
-
-        <div
+        <h1
           style={{
-            marginBottom: 8,
-            padding: 10,
-            background: "#fff",
-            borderRadius: 8,
+            fontSize: "30px", // text-3xl
+            fontWeight: "bold",
+            textAlign: "center",
+            color: PRIMARY_COLOR, // Blue-700
+            marginBottom: "16px", // mb-4
           }}
         >
-          <strong>
-            Player {typeof playerIndex === "number" ? playerIndex + 1 : "?"}
-          </strong>
-          {" | "} Status: {gameStarted ? "Playing" : "Waiting"}
-          {" | "} <small>{playersConnected}/2</small>
-        </div>
+          13-Card Rummy Table
+        </h1>
 
-        {!gameStarted ? (
-          <div>Waiting for players...</div>
-        ) : (
-          <>
+        {/* Outer content wrapper for centering on large screens */}
+        <div
+          style={{
+            maxWidth: "1200px", // Set a maximum width for desktop comfort
+            width: "100%",
+            margin: "0 auto", // Center content on large screens
+          }}
+        >
+          {/* Status Area (Always visible) */}
+          <div
+            style={{
+              margin: "0 auto 16px", // mx-auto mb-4
+              ...styles.sectionCard,
+            }}
+          >
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                marginBottom: 12,
+                fontSize: "18px",
+                fontWeight: "600",
               }}
             >
-              <div style={{ fontSize: 18 }}>
-                Turn:{" "}
-                <strong
-                  style={{ color: turn === playerIndex ? "green" : "red" }}
+              <span>
+                You are Player:
+                <span style={{ color: PRIMARY_COLOR, fontSize: "24px" }}>
+                  {typeof playerIndex === "number" ? playerIndex + 1 : "?"}
+                </span>
+                of {playersConnected} connected
+              </span>
+              <span>
+                Status:{" "}
+                <span
+                  style={{ color: gameStarted ? SUCCESS_COLOR : WARNING_COLOR }}
                 >
-                  {turn === playerIndex ? "YOUR TURN" : `Player ${turn + 1}`}
-                </strong>
-              </div>
-              <div>Deck: {deckCount}</div>
+                  {gameStarted
+                    ? "Playing"
+                    : playersConnected < 2
+                    ? "Waiting for Opponent"
+                    : "Ready to Start"}
+                </span>
+              </span>
             </div>
-
-            <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-              {/* Controls */}
-              <button
-                onClick={onDraw}
-                disabled={!canPlay || deckCount === 0}
-                style={{ padding: "8px 16px" }}
-              >
-                Draw Deck
-              </button>
-              <button onClick={sortHand} style={{ padding: "8px 16px" }}>
-                Sort Hand
-              </button>
-              <button
-                onClick={onDeclare}
-                disabled={!canPlay}
+            {gameMessage && (
+              <div
                 style={{
-                  padding: "8px 16px",
-                  background: "#ff4d4f",
-                  color: "white",
-                  border: "none",
+                  marginTop: "8px",
+                  padding: "8px",
+                  textAlign: "center",
+                  borderRadius: "0.5rem",
+                  backgroundColor:
+                    gameMessage.includes("Error") ||
+                    gameMessage.includes("Invalid")
+                      ? "#fee2e2"
+                      : "#d1fae5",
+                  color:
+                    gameMessage.includes("Error") ||
+                    gameMessage.includes("Invalid")
+                      ? "#b91c1c"
+                      : "#10b981",
+                  fontWeight: "500",
                 }}
               >
-                Declare
-              </button>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                gap: 30,
-                alignItems: "flex-start",
-                marginBottom: 20,
-              }}
-            >
-              {/* Discard Pile */}
-              <div style={{ minWidth: 120 }}>
-                <h4 style={{ marginTop: 0 }}>Discard</h4>
-                {discardPile.length > 0 ? (
-                  <CardView
-                    card={discardPile[0]}
-                    isJoker={discardPile[0].rank === "JOKER"}
-                    onClick={() => {
-                      // --- FIX 2: Discard Pick Handler ---
-                      if (canPlay && hand.length === 13) {
-                        // Only allow picking discard if it's your turn AND you only have 13 cards (i.e., you haven't drawn yet)
-                        send({ type: "pick_discard" });
-                      } else if (canPlay) {
-                        alert(
-                          "You must draw only one card per turn. You may not pick the discard pile."
-                        );
-                      } else {
-                        alert("It is not your turn.");
-                      }
-                    }}
-                    style={{
-                      cursor:
-                        canPlay && hand.length === 13 ? "pointer" : "default",
-                    }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      width: 52,
-                      height: 72,
-                      border: "2px dashed #ccc",
-                      borderRadius: 8,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "#999",
-                    }}
-                  >
-                    Empty
-                  </div>
-                )}
+                {gameMessage}
               </div>
+            )}
+          </div>
 
-              {/* Hand */}
-              <div style={{ flex: 1, overflowX: "auto" }}>
-                <h4 style={{ marginTop: 0 }}>Your Hand</h4>
+          {/* --- Waiting Screen (Displayed when gameStarted is false) --- */}
+          {!gameStarted && (
+            <div style={styles.waitingBox}>
+              <h2
+                style={{
+                  fontSize: "24px",
+                  fontWeight: "700",
+                  color: PRIMARY_COLOR,
+                  marginBottom: "16px",
+                }}
+              >
+                Waiting for Game to Start...
+              </h2>
+              <p style={{ fontSize: "18px", marginBottom: "8px" }}>
+                Current Players:{" "}
+                <span style={{ fontWeight: "bold" }}>
+                  {playersConnected} / 2
+                </span>
+              </p>
+              {playersConnected < 2 ? (
+                <p style={{ color: "#6b7280" }}>
+                  Please share this link with another player to join the game.
+                </p>
+              ) : (
+                <p style={{ color: SUCCESS_COLOR, fontWeight: "500" }}>
+                  All players connected. Waiting for the server to initiate the
+                  game start.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* --- Main Game Content (Displayed when gameStarted is true) --- */}
+          {gameStarted && (
+            <>
+              {/* Game Info and Controls */}
+              <div
+                style={{
+                  margin: "0 auto 24px",
+                  ...styles.sectionCard,
+                }}
+              >
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "center",
-                    paddingBottom: 10,
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    marginBottom: "16px",
                   }}
                 >
-                  <HandSlot
-                    targetIndex={0}
-                    onDropHere={(src, tgt, card) => {
-                      if (card) addCardFromGroupToHandAt(src, tgt, card);
-                      else reorderInHand(src, tgt);
-                    }}
-                  />
-                  {hand.map((c, idx) => (
+                  <div style={{ fontSize: "20px", fontWeight: "bold" }}>
+                    Turn:{" "}
                     <span
-                      key={c.id}
-                      style={{ display: "flex", alignItems: "center" }}
+                      style={{ color: isMyTurn ? SUCCESS_COLOR : "#dc2626" }}
                     >
-                      <DraggableCard
-                        card={c}
-                        fromGroup={null}
-                        index={idx}
-                        onClick={() => canPlay && onDiscard(c)}
-                        onDropToHand={(s, t, card) => {
-                          if (card) addCardFromGroupToHandAt(s, t, card);
-                          else reorderInHand(s, t);
-                        }}
-                      />
-                      <HandSlot
-                        targetIndex={idx + 1}
-                        onDropHere={(src, tgt, card) => {
-                          if (card) addCardFromGroupToHandAt(src, tgt, card);
-                          else reorderInHand(src, tgt);
-                        }}
-                      />
+                      {renderTurnStatus()}
                     </span>
-                  ))}
+                  </div>
+                  <div style={{ fontSize: "18px", fontWeight: "600" }}>
+                    Special Joker:{" "}
+                    <span style={{ color: SUCCESS_COLOR, fontWeight: "bold" }}>
+                      {specialJoker
+                        ? `${specialJoker.rank} ${specialJoker.suit || "★"}`
+                        : "N/A"}
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "12px",
+                    alignItems: "center",
+                  }}
+                >
+                  <button
+                    onClick={onDraw}
+                    disabled={!canPlay || deckCount === 0 || hand.length !== 13}
+                    style={{
+                      ...styles.buttonBase,
+                      backgroundColor: "#3b82f6",
+                      color: "#ffffff",
+                      boxShadow: "0 4px 6px rgba(59, 130, 246, 0.5)",
+                      opacity:
+                        !canPlay || deckCount === 0 || hand.length !== 13
+                          ? 0.6
+                          : 1,
+                    }}
+                  >
+                    Draw from Deck ({deckCount})
+                  </button>
+
+                  <button
+                    onClick={onPickDiscard}
+                    disabled={
+                      !canPlay || discardPile.length === 0 || hand.length !== 13
+                    }
+                    style={{
+                      ...styles.buttonBase,
+                      backgroundColor: "#3b82f6",
+                      color: "#ffffff",
+                      boxShadow: "0 4px 6px rgba(59, 130, 246, 0.5)",
+                      opacity:
+                        !canPlay ||
+                        discardPile.length === 0 ||
+                        hand.length !== 13
+                          ? 0.6
+                          : 1,
+                    }}
+                  >
+                    Pick Discard
+                  </button>
+
+                  <button
+                    onClick={sortHand}
+                    style={{
+                      ...styles.buttonBase,
+                      backgroundColor: "#374151",
+                      color: "#ffffff",
+                    }}
+                  >
+                    Sort Hand
+                  </button>
+
+                  <button
+                    onClick={onDeclare}
+                    disabled={!isReadyToDeclare}
+                    style={{
+                      ...styles.buttonBase,
+                      marginLeft: "auto",
+                      fontSize: "18px",
+                      fontWeight: "bold",
+                      boxShadow: isReadyToDeclare
+                        ? "0 8px 16px rgba(16, 185, 129, 0.4)"
+                        : "none",
+                      backgroundColor: isReadyToDeclare
+                        ? SUCCESS_COLOR
+                        : "#9ca3af",
+                      color: isReadyToDeclare ? "#ffffff" : "#f3f4f6",
+                      cursor: isReadyToDeclare ? "pointer" : "default",
+                    }}
+                  >
+                    Declare (1 Card Left)
+                  </button>
                 </div>
               </div>
-            </div>
 
-            {/* Groups Area */}
-            <div>
-              <h4 style={{ marginTop: 0 }}>Groups (Drag to Organize)</h4>
-              <div style={{ display: "flex", flexWrap: "wrap" }}>
-                {groups.map((g, i) => (
-                  <Bucket
-                    key={i}
-                    index={i}
-                    cards={g}
-                    addCard={addCardToGroup}
-                  />
-                ))}
+              {/* Card Areas (Responsive Flex Container) */}
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "24px",
+                  alignItems: "flex-start",
+                }}
+              >
+                {/* Left Column (Discard & Info) - Fixed/Min width */}
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "24px",
+                    flex: "1 1 200px",
+                    maxWidth: "300px",
+                  }}
+                >
+                  {/* Discard Pile */}
+                  <div style={{ padding: "8px", ...styles.sectionCard }}>
+                    <h3
+                      style={{
+                        fontSize: "18px",
+                        fontWeight: "600",
+                        marginBottom: "8px",
+                        textAlign: "center",
+                      }}
+                    >
+                      Discard
+                    </h3>
+                    {discardPile.length > 0 ? (
+                      <CardView
+                        card={discardPile[0]}
+                        isJoker={discardPile[0].rank === "JOKER"}
+                        isSpecialJoker={
+                          specialJoker &&
+                          discardPile[0].rank === specialJoker.rank
+                        }
+                        onClick={() => {
+                          if (canPlay && hand.length === 13) {
+                            onPickDiscard();
+                          } else {
+                            setGameMessage(
+                              canPlay
+                                ? "You can only pick discard if you have 13 cards in hand."
+                                : "It is not your turn."
+                            );
+                          }
+                        }}
+                        style={{
+                          cursor:
+                            canPlay && hand.length === 13
+                              ? "pointer"
+                              : "default",
+                          margin: "0 auto",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: CARD_WIDTH,
+                          height: CARD_HEIGHT,
+                          border: "2px dashed #9ca3af",
+                          borderRadius: BORDER_RADIUS,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: "12px",
+                          color: "#6b7280",
+                          margin: "0 auto",
+                        }}
+                      >
+                        Empty
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Opponent Status - Fixed layout restored */}
+                  <div
+                    style={{
+                      minHeight: "100px",
+                      padding: "16px",
+                      ...styles.sectionCard,
+                    }}
+                  >
+                    <h3
+                      style={{
+                        fontSize: "16px",
+                        fontWeight: "600",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      Opponent Status
+                    </h3>
+                    <p style={{ fontSize: "14px", color: "#6b7280" }}>
+                      {getOpponentStatusMessage()}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Right Column (Hand & Groups) - Fluid width */}
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "24px",
+                    flex: "3 1 400px",
+                    minWidth: "min(100%, 400px)",
+                    overflow: "hidden",
+                  }}
+                >
+                  {/* Your Hand */}
+                  <div
+                    style={{
+                      flex: 1,
+                      padding: "16px",
+                      ...styles.sectionCard,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <h3
+                      style={{
+                        fontSize: "18px",
+                        fontWeight: "600",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      Your Hand ({hand.length} cards)
+                    </h3>
+                    {/* Horizontal scroll container */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        paddingBottom: "8px",
+                        overflowX: "auto",
+                        WebkitOverflowScrolling: "touch",
+                        flexGrow: 1,
+                      }}
+                    >
+                      {/* Leading drop slot */}
+                      <HandSlot
+                        targetIndex={0}
+                        onDropHere={(src) => {
+                          if (src.card) addCardFromGroupToHandAt(src);
+                          else reorderInHand(src);
+                        }}
+                      />
+                      {hand.map((c, idx) => (
+                        <span
+                          key={c.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <DraggableCard
+                            card={c}
+                            fromGroup={null}
+                            index={idx}
+                            onClick={() => {
+                              // Discard logic for the 14th card
+                              if (canPlay && isReadyToDiscard) {
+                                onDiscard(c);
+                              } else if (hand.length === 1) {
+                                setGameMessage(
+                                  "You are in declaration mode. Drag the 13 grouped cards or click Declare."
+                                );
+                              } else {
+                                setGameMessage(
+                                  "Discarding is only allowed when you have 14 cards."
+                                );
+                              }
+                            }}
+                            onDropToHand={(src) => {
+                              if (src.card) addCardFromGroupToHandAt(src);
+                              else reorderInHand(src);
+                            }}
+                            specialJokerCard={specialJoker}
+                          />
+                          {/* Trailing drop slot */}
+                          <HandSlot
+                            targetIndex={idx + 1}
+                            onDropHere={(src) => {
+                              if (src.card) addCardFromGroupToHandAt(src);
+                              else reorderInHand(src);
+                            }}
+                          />
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Groups Area */}
+                  <div style={{ padding: "16px", ...styles.sectionCard }}>
+                    <h3
+                      style={{
+                        fontSize: "18px",
+                        fontWeight: "600",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      Groups ({totalCardsInGroups} / 13 cards grouped)
+                    </h3>
+                    <div style={{ display: "flex", flexWrap: "wrap" }}>
+                      {groups.map((g, i) => (
+                        <Bucket
+                          key={i}
+                          index={i}
+                          cards={g}
+                          addCard={addCardToGroup}
+                          specialJoker={specialJoker}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {/* End Right Column */}
               </div>
-            </div>
-
-            <div
-              style={{
-                marginTop: 20,
-                padding: 10,
-                background: "#fff",
-                borderRadius: 8,
-                display: "inline-block",
-              }}
-            >
-              <strong>Special Joker: </strong>
-              {specialJoker
-                ? `${specialJoker.rank} ${specialJoker.suit || "★"}`
-                : "None"}
-            </div>
-          </>
-        )}
+              {/* End Card Areas Flex Container */}
+            </>
+          )}
+        </div>
+        {/* End Outer Content Wrapper */}
       </div>
     </DndProvider>
   );
