@@ -1,0 +1,29 @@
+.card {
+  background: #ffffff;
+  border: 1px solid #e5e5e5;
+  padding: 12px 16px;
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro", "Helvetica",
+    sans-serif;
+}
+
+.label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #222;
+}
+
+.active {
+  font-size: 14px;
+  color: #0a7f3f;
+  font-weight: 500;
+}
+
+.idle {
+  font-size: 14px;
+  color: #555;
+}

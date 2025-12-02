@@ -1,0 +1,71 @@
+/* src/components/styles/Groups.module.css */
+
+.container {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #ececec;
+  padding: 16px;
+  margin-top: 16px;
+  margin-bottom: 16px;
+  min-height: 180px; /* prevents collapsing */
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.groupRow {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.group {
+  width: 160px;
+  min-height: 130px;
+  border-radius: 10px;
+  border: 2px dashed #d2d2d2;
+  background: #f8f8f8;
+  padding: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: flex-start;
+}
+
+.groupHover {
+  border-color: #3b82f6;
+  background: #eef3ff;
+}
+
+.placeholder {
+  color: #999;
+  font-size: 13px;
+  margin: auto;
+  text-align: center;
+}
+
+.card {
+  width: 50px;
+  height: 70px;
+  border-radius: 8px;
+  border: 1px solid #d7d7d7;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+}
+
+.rank {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.suit {
+  font-size: 18px;
+  margin-top: 2px;
+}

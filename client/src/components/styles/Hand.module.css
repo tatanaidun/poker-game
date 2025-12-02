@@ -1,0 +1,84 @@
+/* src/components/styles/Hand.module.css */
+
+.container {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #ececec;
+  padding: 16px;
+  min-height: 150px; /* keeps area from collapsing */
+}
+
+.headerRow {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.title {
+  color: #333;
+}
+
+.count {
+  color: #999;
+}
+
+.scrollArea {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px 4px;
+  min-height: 90px; /* keeps layout fixed while dragging */
+}
+
+.scrollArea::-webkit-scrollbar {
+  height: 6px;
+}
+
+.scrollArea::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+
+.card {
+  width: 80px;
+  height: 100px;
+  border-radius: 8px;
+  border: 1px solid #d7d7d7;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  cursor: grab;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+}
+
+.rank {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.suit {
+  font-size: 18px;
+  margin-top: 2px;
+}
+
+.empty {
+  color: #999;
+  font-size: 14px;
+  padding: 12px 0;
+}
+
+.hint {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: #666;
+}

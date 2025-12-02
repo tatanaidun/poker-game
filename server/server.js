@@ -534,6 +534,7 @@ wss.on("connection", (ws) => {
 
         // 10) Persist the new hand and broadcast
         room.hands[pi] = deduped;
+        room.groups[pi] = myGroups;
         broadcastState();
         break;
       }
