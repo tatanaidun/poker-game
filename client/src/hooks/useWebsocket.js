@@ -3,12 +3,13 @@ import { useEffect, useRef, useState } from "react";
 export default function useWebSocket() {
   const wsRef = useRef(null);
 
-  // Refs to avoid stale closures
+  // Avoid stale closures
   const playerIndexRef = useRef(null);
   const gameStartedRef = useRef(false);
   const playersConnectedRef = useRef(0);
 
   // Public state
+  const [serverHandLength, setServerHandLength] = useState(0); // <-- IMPORTANT
   const [playerIndex, setPlayerIndex] = useState(null);
   const [playersConnected, setPlayersConnected] = useState(0);
   const [gameStarted, setGameStarted] = useState(false);
@@ -22,11 +23,9 @@ export default function useWebSocket() {
   const [specialJoker, setSpecialJoker] = useState(null);
 
   const [gameMessage, setGameMessage] = useState(null);
-
-  // NEW: connection health
   const [isConnected, setIsConnected] = useState(false);
 
-  // keep refs in sync
+  // Keep refs synced
   useEffect(() => {
     playerIndexRef.current = playerIndex;
   }, [playerIndex]);
@@ -39,7 +38,7 @@ export default function useWebSocket() {
     playersConnectedRef.current = playersConnected;
   }, [playersConnected]);
 
-  // Safe send wrapper – never throws when WS is down
+  // Safe send
   const sendMessage = (data) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -49,15 +48,15 @@ export default function useWebSocket() {
     ws.send(JSON.stringify(data));
   };
 
-  // Create WebSocket once
+  // Initialize WebSocket ONCE
   useEffect(() => {
-    console.log("Creating WebSocket connection to ws://localhost:8080");
+    console.log("Creating WebSocket connection ws://localhost:8080");
     const ws = new WebSocket("ws://localhost:8080");
     wsRef.current = ws;
 
     ws.onopen = () => {
       console.log("[WS] Connected");
-      setIsConnected(true); // ✅ mark healthy
+      setIsConnected(true);
 
       ws.send(
         JSON.stringify({
@@ -69,7 +68,7 @@ export default function useWebSocket() {
     };
 
     ws.onmessage = (evt) => {
-      let msg;
+      let msg = null;
       try {
         msg = JSON.parse(evt.data);
       } catch (e) {
@@ -88,6 +87,7 @@ export default function useWebSocket() {
 
         case "players": {
           setPlayersConnected(msg.players || 0);
+
           if (!gameStartedRef.current && msg.players === 2) {
             setGameMessage("2 players connected. Getting game ready…");
           }
@@ -96,6 +96,7 @@ export default function useWebSocket() {
 
         case "player_left": {
           setGameMessage(`Player ${msg.slot + 1} left. Game reset.`);
+
           setGameStarted(false);
           setHand([]);
           setGroups([[], [], [], []]);
@@ -103,6 +104,7 @@ export default function useWebSocket() {
           setDiscardPile([]);
           setTurn(null);
           setSpecialJoker(null);
+
           break;
         }
 
@@ -116,10 +118,13 @@ export default function useWebSocket() {
           setTurn(typeof msg.turn === "number" ? msg.turn : 0);
 
           const myIndex = playerIndexRef.current;
+
           if (msg.hands && typeof myIndex === "number") {
-            setHand(msg.hands[myIndex] || []);
+            setHand(msg.hands[myIndex]);
+            setServerHandLength(msg.hands[myIndex].length); // <-- TRACK REAL LENGTH
           } else {
             setHand([]);
+            setServerHandLength(0);
           }
 
           setGroups([[], [], [], []]);
@@ -129,20 +134,27 @@ export default function useWebSocket() {
         case "update": {
           const myIndex = playerIndexRef.current;
 
+          // Shared state
           setDeckCount(msg.deckCount || 0);
           setDiscardPile(msg.discardPile || []);
-          setPlayersConnected(msg.numPlayers || playersConnectedRef.current);
+          setPlayersConnected(msg.players || playersConnectedRef.current);
 
           if (typeof msg.turn === "number") setTurn(msg.turn);
 
-          if (gameStartedRef.current && typeof myIndex === "number") {
+          // ALWAYS update hand + groups (do NOT gate with gameStarted)
+          if (typeof myIndex === "number") {
+            // Update HAND
             if (msg.hands?.[myIndex]) {
               setHand(msg.hands[myIndex]);
+              setServerHandLength(msg.hands[myIndex].length); // <-- IMPORTANT FIX
             }
+
+            // Update GROUPS
             if (msg.groups?.[myIndex]) {
               setGroups(msg.groups[myIndex]);
             }
           }
+
           break;
         }
 
@@ -172,15 +184,13 @@ export default function useWebSocket() {
 
     ws.onerror = (err) => {
       console.warn("[WS ERROR]", err);
-      // transient errors are common in dev (Vite HMR), don't scare the user
       setIsConnected(false);
     };
 
-    ws.onclose = (event) => {
-      console.warn("[WS] Disconnected", event.code, event.reason || "");
+    ws.onclose = () => {
+      console.warn("[WS] Disconnected");
       setIsConnected(false);
 
-      // Only show a user-facing error if we were actually in a game
       if (gameStartedRef.current) {
         setGameMessage("Connection lost. Please refresh.");
       }
@@ -189,33 +199,37 @@ export default function useWebSocket() {
     return () => {
       try {
         ws.close();
-      } catch {
-        /* ignore */
+      } catch (e) {
+        console.error(e);
       }
     };
   }, []);
 
   return {
-    // connection status
+    // Connection
     isConnected,
 
-    // game state
+    // Game state
     playerIndex,
     playersConnected,
     gameStarted,
     turn,
+
     hand,
     groups,
+
     deckCount,
     discardPile,
     specialJoker,
-    gameMessage,
 
-    // setters used by App for local DnD updates
+    gameMessage,
+    serverHandLength, // <-- EXPORTED FOR PROPER BUTTON LOGIC
+
+    // Local mutators used by App DnD logic
     setHand,
     setGroups,
 
-    // safe sender
+    // Safe WS sender
     sendMessage,
   };
 }

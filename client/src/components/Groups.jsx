@@ -3,20 +3,30 @@ import React from "react";
 import { useDrop } from "react-dnd";
 import styles from "./styles/Groups.module.css";
 
-// MUST MATCH Hand.jsx
 const CARD_ITEM = "HAND_CARD";
 
 function GroupBucket({
   cards,
   groupIndex,
-  onDropCardToGroup,
+  onDropCardsFromHand,
   onReturnCardToHand,
 }) {
   const [{ isOver }, dropRef] = useDrop({
     accept: CARD_ITEM,
     drop: (item) => {
-      if (!item.card) return;
-      onDropCardToGroup(item.card, groupIndex);
+      if (item.source !== "hand") return;
+
+      // Prefer multi-ids (new flow)
+      let ids = Array.isArray(item.ids) ? item.ids : [];
+
+      // Fallback: old style with item.card
+      if (!ids.length && item.card && item.card.id) {
+        ids = [item.card.id];
+      }
+
+      if (!ids.length) return;
+
+      onDropCardsFromHand(ids, groupIndex);
     },
     collect: (monitor) => ({
       isOver: monitor.isOver(),
@@ -33,15 +43,16 @@ function GroupBucket({
       )}
 
       {cards.map((card) => (
-        <button
+        <div
           key={card.id}
-          type="button"
           className={styles.card}
           onClick={() => onReturnCardToHand(card, groupIndex)}
+          role="button"
+          tabIndex={0}
         >
           <div className={styles.rank}>{card.rank}</div>
           <div className={styles.suit}>{card.suit}</div>
-        </button>
+        </div>
       ))}
     </div>
   );
@@ -49,7 +60,7 @@ function GroupBucket({
 
 export default function Groups({
   groups,
-  onDropCardToGroup,
+  onDropCardsFromHand,
   onReturnCardToHand,
 }) {
   const bucketCount = 4;
@@ -61,14 +72,13 @@ export default function Groups({
   return (
     <div className={styles.container}>
       <div className={styles.title}>Groups</div>
-
       <div className={styles.groupRow}>
         {buckets.map((cards, idx) => (
           <GroupBucket
             key={idx}
             cards={cards}
             groupIndex={idx}
-            onDropCardToGroup={onDropCardToGroup}
+            onDropCardsFromHand={onDropCardsFromHand}
             onReturnCardToHand={onReturnCardToHand}
           />
         ))}

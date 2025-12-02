@@ -1,47 +1,66 @@
 // src/components/Hand.jsx
-import React from "react";
+import React, { useCallback } from "react";
 import { useDrag, useDrop } from "react-dnd";
 import styles from "./styles/Hand.module.css";
 
 const CARD_ITEM = "HAND_CARD";
 
-function HandCard({ card, index, onMove, onClick }) {
-  // Make this card draggable
+function HandCard({
+  card,
+  index,
+  isSelected,
+  onToggleSelect,
+  onReorderHand,
+  selectedIds,
+}) {
+  // Drag: either all selected cards, or just this one
   const [{ isDragging }, dragRef] = useDrag({
     type: CARD_ITEM,
-    item: { card, index }, // MUST include card
+    item: () => ({
+      source: "hand",
+      ids: selectedIds.length > 0 ? selectedIds : [card.id],
+      singleId: card.id,
+      card,
+      fromIndex: index,
+    }),
     collect: (monitor) => ({
       isDragging: monitor.isDragging(),
     }),
   });
 
-  // Make this card a drop target (reorder in hand)
+  // Drop: only used for in-hand reorder when dragging a single card
   const [, dropRef] = useDrop({
     accept: CARD_ITEM,
     drop: (item) => {
-      if (item.index === index) return;
-      onMove(item.index, index);
-      item.index = index; // keep index updated for subsequent drops
+      // Only reorder if it's a single-card drag inside hand
+      if (item.source !== "hand") return;
+      if (!item.singleId || item.ids.length !== 1) return;
+      if (item.fromIndex === index) return;
+      onReorderHand(item.fromIndex, index);
+      item.fromIndex = index;
     },
   });
 
-  // Combine drag + drop into one callback ref (no useRef, no lint issue)
-  const setNodeRef = (node) => {
-    if (!node) return;
-    dragRef(dropRef(node));
-  };
-  console.log(card.rank);
+  const setRef = useCallback(
+    (node) => {
+      if (!node) return;
+      dragRef(dropRef(node));
+    },
+    [dragRef, dropRef]
+  );
+
   return (
-    <button
-      ref={setNodeRef}
-      type="button"
-      className={styles.card}
-      style={{ opacity: isDragging ? 0.4 : 1 }}
-      onClick={onClick}
+    <div
+      ref={setRef}
+      className={`${styles.card} ${isSelected ? styles.cardSelected : ""}`}
+      style={{ opacity: isDragging ? 0.35 : 1 }}
+      onClick={() => onToggleSelect(card.id)}
+      role="button"
+      tabIndex={0}
     >
       <div className={styles.rank}>{card.rank}</div>
       <div className={styles.suit}>{card.suit}</div>
-    </button>
+    </div>
   );
 }
 
@@ -49,35 +68,11 @@ export default function Hand({
   hand,
   turn,
   playerIndex,
-  sendMessage,
+  selectedIds,
+  onToggleSelect,
   onReorderHand,
 }) {
   const isMyTurn = turn === playerIndex;
-
-  // Called when a card is dropped onto another card in hand
-  const handleMoveInHand = (fromIndex, toIndex) => {
-    if (fromIndex === toIndex) return;
-
-    const updated = [...hand];
-    const [moved] = updated.splice(fromIndex, 1);
-    updated.splice(toIndex, 0, moved);
-
-    const newOrderIds = updated.map((c) => c.id);
-
-    // Let parent update state + inform server
-    onReorderHand(newOrderIds);
-  };
-
-  const handleCardClick = (card) => {
-    // click-to-discard only when it's your turn and you have 14 cards
-    if (!isMyTurn) return;
-    if (hand.length !== 14) return;
-
-    sendMessage({
-      type: "discard",
-      cardId: card.id,
-    });
-  };
 
   return (
     <div className={styles.container}>
@@ -92,8 +87,10 @@ export default function Hand({
             key={card.id}
             card={card}
             index={index}
-            onMove={handleMoveInHand}
-            onClick={() => handleCardClick(card)}
+            isSelected={selectedIds.includes(card.id)}
+            selectedIds={selectedIds}
+            onToggleSelect={onToggleSelect}
+            onReorderHand={onReorderHand}
           />
         ))}
 
@@ -102,8 +99,10 @@ export default function Hand({
         )}
       </div>
 
-      {isMyTurn && hand.length === 14 && (
-        <div className={styles.hint}>Tap a card to discard.</div>
+      {isMyTurn && (
+        <div className={styles.hint}>
+          Click to select cards. Drag selected cards to groups.
+        </div>
       )}
     </div>
   );

@@ -30,7 +30,8 @@
 }
 
 .sortButton,
-.declareButton {
+.declareButton,
+.discardSelected {
   padding: 8px 16px;
   border-radius: 8px;
   border: none;
@@ -48,7 +49,8 @@
   background: #005fcc;
 }
 
-.declareButtonDisabled {
+.declareButtonDisabled,
+.discardSelectedDisabled {
   height: 30px;
   border: none;
   border-radius: 8px;

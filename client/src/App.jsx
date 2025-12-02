@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { DndProvider } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 
@@ -27,50 +27,94 @@ export default function App() {
     discardPile,
     specialJoker,
     gameMessage,
+    serverHandLength,
     setHand,
     setGroups,
     sendMessage,
   } = useWebSocket();
-
+  const [selectedIds, setSelectedIds] = useState([]);
+  const totalCards = hand.length + groups.flat().length;
+  const groupedCount = groups.flat().length;
   const isMyTurn = playerIndex !== null && turn === playerIndex;
+
+  const canDraw =
+    isMyTurn &&
+    gameStarted &&
+    playersConnected === 2 &&
+    totalCards === 13 &&
+    deckCount > 0;
+
+  const canPickDiscard =
+    isMyTurn &&
+    gameStarted &&
+    playersConnected === 2 &&
+    totalCards === 13 &&
+    discardPile.length > 0;
+
+  const canDiscard =
+    isMyTurn &&
+    gameStarted &&
+    playersConnected === 2 &&
+    totalCards === 14 &&
+    selectedIds.length === 1; // single selection only
+
   const canDeclare =
     isMyTurn &&
-    isConnected &&
-    hand.length + groups.flat().length === 14 &&
-    groups.flat().length === 13 &&
+    gameStarted &&
+    playersConnected === 2 &&
+    totalCards === 14 &&
+    groupedCount === 13 &&
     hand.length === 1;
+
+  const handleToggleSelect = (cardId) => {
+    setSelectedIds((prev) =>
+      prev.includes(cardId)
+        ? prev.filter((id) => id !== cardId)
+        : [...prev, cardId]
+    );
+  };
+
+  const handleDiscardSelected = () => {
+    if (!canDiscard) return;
+    const cardId = selectedIds[0];
+    const card = hand.find((c) => c.id === cardId);
+    if (!card) return;
+
+    sendMessage({ type: "discard", cardId: card.id });
+    setSelectedIds([]);
+  };
+
   // ─────────────────────────────────────────────
   // DnD: hand → group
   // ─────────────────────────────────────────────
-  const handleMoveCardToGroup = (card, targetGroupIndex) => {
-    if (!isConnected) return;
+  const handleMoveCardsFromHandToGroup = (ids, targetGroupIndex) => {
+    const movingCards = hand.filter((c) => ids.includes(c.id));
+    if (!movingCards.length) return;
 
-    // remove from hand
-    const newHand = hand.filter((c) => c.id !== card.id);
-
-    // add to groups
+    const remainingHand = hand.filter((c) => !ids.includes(c.id));
     const newGroups = groups.map((g, idx) =>
-      idx === targetGroupIndex ? [...g, card] : g
+      idx === targetGroupIndex ? [...g, ...movingCards] : g
     );
 
-    setHand(newHand);
+    setHand(remainingHand);
     setGroups(newGroups);
+    setSelectedIds([]); // clear selection
 
-    // Sync to server
-    sendMessage({ type: "sync_hand", hand: newHand.map((c) => c.id) });
+    // Sync with server
+    sendMessage({ type: "sync_hand", hand: remainingHand.map((c) => c.id) });
     sendMessage({ type: "group", groups: newGroups });
   };
+
   // ─────────────────────────────────────────────
   // Hand → Hand reordering (drag inside hand)
   // ─────────────────────────────────────────────
-  const handleReorderHand = (newOrderIds) => {
-    if (!isConnected) return;
+  const handleReorderHand = (fromIndex, toIndex) => {
+    const updated = [...hand];
+    const [moved] = updated.splice(fromIndex, 1);
+    updated.splice(toIndex, 0, moved);
 
-    const map = new Map(hand.map((c) => [c.id, c]));
-    const reordered = newOrderIds.map((id) => map.get(id)).filter(Boolean);
-
-    setHand(reordered);
-    sendMessage({ type: "reorder", order: newOrderIds });
+    setHand(updated);
+    sendMessage({ type: "reorder", order: updated.map((c) => c.id) });
   };
 
   // ─────────────────────────────────────────────
@@ -212,7 +256,8 @@ export default function App() {
             <section className={styles.topRow}>
               <DeckActions
                 deckCount={deckCount}
-                canDraw={isMyTurn && hand.length === 13 && isConnected}
+                canDraw={canDraw}
+                canPickDiscard={canPickDiscard}
                 sendMessage={sendMessage}
               />
 
@@ -220,7 +265,7 @@ export default function App() {
                 discardPile={discardPile}
                 canPick={
                   isMyTurn &&
-                  hand.length === 13 &&
+                  serverHandLength === 13 &&
                   discardPile.length > 0 &&
                   isConnected
                 }
@@ -237,6 +282,18 @@ export default function App() {
                   disabled={!isConnected}
                 >
                   Sort Hand
+                </button>
+                <button
+                  className={
+                    canDiscard
+                      ? styles.discardSelected
+                      : styles.discardSelectedDisabled
+                  }
+                  type="button"
+                  onClick={handleDiscardSelected}
+                  disabled={!canDiscard}
+                >
+                  Discard Selected
                 </button>
 
                 <button
@@ -255,14 +312,15 @@ export default function App() {
             </section>
             <Groups
               groups={groups}
-              onDropCardToGroup={handleMoveCardToGroup}
+              onDropCardsFromHand={handleMoveCardsFromHandToGroup}
               onReturnCardToHand={handleReturnCardToHand}
             />
             <Hand
               hand={hand}
               turn={turn}
               playerIndex={playerIndex}
-              sendMessage={sendMessage}
+              selectedIds={selectedIds}
+              onToggleSelect={handleToggleSelect}
               onReorderHand={handleReorderHand}
             />
           </main>
