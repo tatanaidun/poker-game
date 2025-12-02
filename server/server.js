@@ -365,56 +365,178 @@ wss.on("connection", (ws) => {
         break;
       }
 
+      //   case "move_group_to_hand": {
+      //     // Permanent fix for card retrieval from Group to Hand.
+      //     if (
+      //       !msg.cardId ||
+      //       typeof msg.fromGroupIndex !== "number" ||
+      //       !Array.isArray(msg.toHandOrder)
+      //     )
+      //       return;
+
+      //     const fromGroupIndex = msg.fromGroupIndex;
+      //     const cardId = msg.cardId;
+
+      //     // 1. Find the card object in the specified group.
+      //     const group = room.groups[pi][fromGroupIndex];
+      //     if (!group) return;
+
+      //     const cardIndexInGroup = group.findIndex((c) => c.id === cardId);
+      //     if (cardIndexInGroup === -1) {
+      //       console.warn(
+      //         `Card ID ${cardId} not found in Group ${fromGroupIndex} for Player ${pi}.`
+      //       );
+      //       return;
+      //     }
+
+      //     // 2. Perform the atomic move:
+      //     const [cardToMove] = group.splice(cardIndexInGroup, 1);
+
+      //     // 3. Reconstruct the new Hand using a verified inventory pool.
+      //     const totalInventory = [
+      //       ...room.hands[pi],
+      //       ...room.groups[pi].flat(),
+      //       cardToMove, // Include the card being moved
+      //     ];
+      //     const inventoryMap = new Map(totalInventory.map((c) => [c.id, c]));
+
+      //     const newHand = [];
+      //     msg.toHandOrder.forEach((id) => {
+      //       const cardObject = inventoryMap.get(id);
+      //       if (cardObject) {
+      //         newHand.push(cardObject);
+      //         inventoryMap.delete(id);
+      //       }
+      //     });
+
+      //     // 4. Update the player's hand and groups state on the server
+      //     room.hands[pi] = newHand;
+      //     broadcastState();
+      //     break;
+      //   }
+
       case "move_group_to_hand": {
-        // Permanent fix for card retrieval from Group to Hand.
+        // Validate input
         if (
           !msg.cardId ||
           typeof msg.fromGroupIndex !== "number" ||
           !Array.isArray(msg.toHandOrder)
-        )
-          return;
-
-        const fromGroupIndex = msg.fromGroupIndex;
-        const cardId = msg.cardId;
-
-        // 1. Find the card object in the specified group.
-        const group = room.groups[pi][fromGroupIndex];
-        if (!group) return;
-
-        const cardIndexInGroup = group.findIndex((c) => c.id === cardId);
-        if (cardIndexInGroup === -1) {
-          console.warn(
-            `Card ID ${cardId} not found in Group ${fromGroupIndex} for Player ${pi}.`
-          );
+        ) {
+          console.warn("move_group_to_hand: invalid payload", msg);
           return;
         }
 
-        // 2. Perform the atomic move:
-        const [cardToMove] = group.splice(cardIndexInGroup, 1);
+        const fromGroupIndex = msg.fromGroupIndex;
+        const cardId = msg.cardId;
+        const myGroups = room.groups[pi] || [];
 
-        // 3. Reconstruct the new Hand using a verified inventory pool.
+        // 1) Find and remove the card from the specified group (if present).
+        let cardToMove = null;
+        if (Array.isArray(myGroups[fromGroupIndex])) {
+          const idxInGroup = myGroups[fromGroupIndex].findIndex(
+            (c) => c.id === cardId
+          );
+          if (idxInGroup !== -1) {
+            // remove and capture the card object
+            const [removed] = myGroups[fromGroupIndex].splice(idxInGroup, 1);
+            cardToMove = removed;
+          }
+        }
+
+        // 2) If not found in claimed group, try to locate it in any group (defensive)
+        if (!cardToMove) {
+          for (let gi = 0; gi < myGroups.length && !cardToMove; gi++) {
+            const idx = myGroups[gi].findIndex((c) => c.id === cardId);
+            if (idx !== -1) {
+              const [removed] = myGroups[gi].splice(idx, 1);
+              cardToMove = removed;
+              console.warn(
+                `move_group_to_hand: card ${cardId} not found in fromGroupIndex ${fromGroupIndex}, removed from group ${gi} instead.`
+              );
+            }
+          }
+        }
+
+        // 3) If still not found, try to find it in the server hand (maybe client referenced an already-hand card)
+        if (!cardToMove) {
+          const idxInHand = room.hands[pi].findIndex((c) => c.id === cardId);
+          if (idxInHand !== -1) {
+            cardToMove = room.hands[pi][idxInHand];
+            console.warn(
+              `move_group_to_hand: card ${cardId} already in hand for player ${pi}.`
+            );
+          }
+        }
+
+        // 4) If we still don't have the card object, at least create a placeholder
+        if (!cardToMove) {
+          console.warn(
+            `move_group_to_hand: card ${cardId} not found in inventory for player ${pi}. Creating placeholder.`
+          );
+          cardToMove = { id: cardId, suit: null, rank: "UNKNOWN" };
+        }
+
+        // 5) Build an inventory that contains everything server knows about this player's cards
         const totalInventory = [
           ...room.hands[pi],
-          ...room.groups[pi].flat(),
-          cardToMove, // Include the card being moved
+          ...myGroups.flat(),
+          cardToMove, // ensure moved card is present
         ];
         const inventoryMap = new Map(totalInventory.map((c) => [c.id, c]));
 
+        // 6) Use client's toHandOrder to reconstruct hand, pulling card objects from inventoryMap
         const newHand = [];
-        msg.toHandOrder.forEach((id) => {
-          const cardObject = inventoryMap.get(id);
-          if (cardObject) {
-            newHand.push(cardObject);
+        const missingIds = [];
+        for (const id of msg.toHandOrder) {
+          if (inventoryMap.has(id)) {
+            newHand.push(inventoryMap.get(id));
             inventoryMap.delete(id);
+          } else {
+            // client referenced an id we don't know about
+            missingIds.push(id);
+            console.warn(
+              `move_group_to_hand: toHandOrder contains unknown id ${id} for player ${pi}`
+            );
           }
-        });
+        }
 
-        // 4. Update the player's hand and groups state on the server
-        room.hands[pi] = newHand;
+        // 7) If cardToMove was not included in client's toHandOrder, insert it.
+        if (!newHand.some((c) => c.id === cardToMove.id)) {
+          // Try to find a reasonable insertion position:
+          // if there is at least one card in newHand and client had a neighboring id in missingIds,
+          // we could insert near that neighbor — but simplest: append to end.
+          newHand.push(cardToMove);
+          console.warn(
+            `move_group_to_hand: card ${cardToMove.id} missing from toHandOrder; appending to reconstructed hand for player ${pi}.`
+          );
+        }
+
+        // 8) Append any remaining inventory items (defensive — avoid losing cards)
+        if (inventoryMap.size > 0) {
+          // Append in stable order so nothing disappears
+          for (const remaining of inventoryMap.values()) {
+            newHand.push(remaining);
+            console.warn(
+              `move_group_to_hand: appending remaining inventory card ${remaining.id} to hand for player ${pi}`
+            );
+          }
+        }
+
+        // 9) Sanity: ensure no duplicates (by id)
+        const seen = new Set();
+        const deduped = [];
+        for (const c of newHand) {
+          if (!seen.has(c.id)) {
+            seen.add(c.id);
+            deduped.push(c);
+          }
+        }
+
+        // 10) Persist the new hand and broadcast
+        room.hands[pi] = deduped;
         broadcastState();
         break;
       }
-
       case "sync_hand": {
         // Used for client-initiated hand updates, mostly reordering.
         if (!Array.isArray(msg.hand)) break;

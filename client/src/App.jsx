@@ -1,3 +1,4 @@
+// Paste this entire file to replace your existing App.jsx
 import React, {
   useCallback,
   useEffect,
@@ -323,6 +324,22 @@ export default function App() {
 
   const totalCardsInGroups = useMemo(() => groups.flat().length, [groups]);
 
+  // Refs to keep latest state available inside ws handlers without re-creating handlers
+  const playerIndexRef = useRef(playerIndex);
+  const gameStartedRef = useRef(gameStarted);
+  const playersConnectedRef = useRef(playersConnected);
+
+  // keep refs in sync with state
+  useEffect(() => {
+    playerIndexRef.current = playerIndex;
+  }, [playerIndex]);
+  useEffect(() => {
+    gameStartedRef.current = gameStarted;
+  }, [gameStarted]);
+  useEffect(() => {
+    playersConnectedRef.current = playersConnected;
+  }, [playersConnected]);
+
   // Custom function to render the turn status text
   const renderTurnStatus = useCallback(() => {
     if (playerIndex === null) {
@@ -354,135 +371,303 @@ export default function App() {
     setSpecialJoker(null);
   }, []);
 
-  // --- CRITICAL FIX: Added 'gameStarted' to dependency array ---
-  // This forces the effect to rerun and create a new, fresh onmessage closure
-  // that holds the latest 'gameStarted' value whenever the game state flips.
+  // Create websocket once on mount (do NOT depend on playerIndex/gameStarted)
+  //   useEffect(() => {
+  //     const ws = new WebSocket("ws://localhost:8080");
+  //     wsRef.current = ws;
+
+  //     ws.onopen = () => {
+  //       console.log("[WS] Connected. Joining room.");
+
+  //       // Send join message. Use the latest playerIndex if available (usually null on first join).
+  //       ws.send(
+  //         JSON.stringify({
+  //           type: "join_room",
+  //           room: "table-1",
+  //           playerId: playerIndexRef.current,
+  //         })
+  //       );
+  //     };
+
+  //     ws.onmessage = (evt) => {
+  //       let msg = null;
+  //       try {
+  //         msg = JSON.parse(evt.data);
+  //       } catch (e) {
+  //         console.warn("Invalid WS message", e, evt.data);
+  //         return;
+  //       }
+
+  //       // assigned -> server gives you your player slot
+  //       if (msg.type === "assigned") {
+  //         const assignedPlayerIndex = msg.player;
+  //         setPlayerIndex(assignedPlayerIndex);
+  //         setPlayersConnected(msg.players || 1);
+  //         console.log("[CLIENT ASSIGNED] Player Index:", assignedPlayerIndex);
+  //         return;
+  //       }
+
+  //       // players -> reported number of connected players in room
+  //       if (msg.type === "players") {
+  //         setPlayersConnected(msg.players || 0);
+  //         if (!gameStartedRef.current && msg.players === 2) {
+  //           setGameMessage("2 players connected. Game ready to start.");
+  //         }
+  //         return;
+  //       }
+
+  //       if (msg.type === "player_left") {
+  //         setGameMessage(`Player ${msg.slot + 1} left. Game reset.`);
+  //         resetGameState(); // Reset all game state
+  //         return;
+  //       }
+
+  //       // game_start -> server tells clients to show board + initial deal
+  //       if (msg.type === "game_start") {
+  //         console.log("[SERVER] Game Start Message Received.");
+
+  //         // set authoritative shared bits
+  //         setGameStarted(true);
+  //         setGameMessage(null);
+  //         setSpecialJoker(msg.specialJoker || null);
+  //         setDeckCount(msg.deckCount || 0);
+  //         setDiscardPile(msg.discardPile || []);
+  //         setGroups([[], [], [], []]);
+  //         setPlayersConnected(msg.numPlayers || 2);
+
+  //         if (typeof msg.turn === "number") {
+  //           setTurn(msg.turn);
+  //         } else {
+  //           setTurn(0);
+  //         }
+
+  //         // set hand if the server included hands and we already know our player slot
+  //         const myIndex = playerIndexRef.current;
+  //         if (typeof myIndex === "number" && msg.hands && msg.hands[myIndex]) {
+  //           setHand(msg.hands[myIndex]);
+  //         } else {
+  //           // If we don't yet have an assigned player index, we'll rely on the 'assigned'
+  //           // message that should come (server must ensure assigned arrives before game_start).
+  //           setHand([]);
+  //         }
+  //         return;
+  //       }
+
+  //       // update -> incremental state updates
+  //       if (msg.type === "update") {
+  //         // Only process update when client has playerIndex assigned (otherwise we don't know which hand to read)
+  //         const myIndex = playerIndexRef.current;
+  //         if (typeof myIndex === "number") {
+  //           console.log("[SERVER UPDATE] Received state for P" + (myIndex + 1), {
+  //             deckCount: msg.deckCount,
+  //             turn: msg.turn,
+  //             gameStartedNow: gameStartedRef.current,
+  //           });
+
+  //           // Authoritative state updates
+  //           setDeckCount(msg.deckCount || 0);
+  //           setDiscardPile(msg.discardPile || []);
+  //           setPlayersConnected(msg.numPlayers || playersConnectedRef.current);
+
+  //           if (typeof msg.turn === "number") {
+  //             setTurn(msg.turn);
+  //           }
+
+  //           // Only update hand/groups if the UI is showing the game board (server started)
+  //           if (gameStartedRef.current) {
+  //             const currentGroups = msg.groups?.[myIndex];
+  //             if (currentGroups && Array.isArray(currentGroups)) {
+  //               setGroups(currentGroups);
+  //             }
+
+  //             const currentHand = msg.hands?.[myIndex];
+  //             if (currentHand) {
+  //               setHand(currentHand);
+  //             }
+  //             setGameMessage(null);
+  //           }
+  //         } else {
+  //           // Not assigned yet; ignore update (or you might console.log for debugging)
+  //           console.debug("[UPDATE] Ignored update - client not assigned yet");
+  //         }
+  //         return;
+  //       }
+
+  //       if (msg.type === "win") {
+  //         setGameMessage(
+  //           `Player ${msg.winner + 1} wins! Game will restart shortly.`
+  //         );
+  //         setGameStarted(false);
+  //         setTurn(null);
+  //         return;
+  //       }
+
+  //       if (msg.type === "invalid_declare") {
+  //         setGameMessage(
+  //           "Invalid declaration! Check your groups (1 Pure + 1 Dummy required). Turn passed."
+  //         );
+  //         return;
+  //       }
+
+  //       if (msg.type === "error") {
+  //         setGameMessage(`Server Error: ${msg.error}`);
+  //         return;
+  //       }
+  //     };
+
+  //     ws.onerror = (err) => {
+  //       console.error("[WS] Error", err);
+  //       setGameMessage("WebSocket error. Check server or reload.");
+  //     };
+
+  //     return () => {
+  //       try {
+  //         if (wsRef.current) {
+  //           wsRef.current.close();
+  //         }
+  //         wsRef.current = null;
+  //       } catch (e) {
+  //         console.log(e);
+  //       }
+  //     };
+  //     // IMPORTANT: empty dependency array -> create socket once
+  //   }, []); // <-- create socket once
+
+  //   // keep the refs in sync (we already do this above via small useEffects but repeating to be safe)
+  //   useEffect(() => {
+  //     playerIndexRef.current = playerIndex;
+  //   }, [playerIndex]);
+  //   useEffect(() => {
+  //     gameStartedRef.current = gameStarted;
+  //   }, [gameStarted]);
+  //   useEffect(() => {
+  //     playersConnectedRef.current = playersConnected;
+  //   }, [playersConnected]);
   useEffect(() => {
-    // --- WebSocket Connection ---
-    // NOTE: This URL must match your WebSocket server instance (e.g., ws://localhost:8080).
     const ws = new WebSocket("ws://localhost:8080");
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log("[WS] Connected. Joining room.");
+      console.log("[WS] Connected.");
+
       ws.send(
         JSON.stringify({
           type: "join_room",
           room: "table-1",
-          playerId: playerIndex,
         })
       );
     };
 
     ws.onmessage = (evt) => {
-      const msg = JSON.parse(evt.data);
-
-      if (msg.type === "assigned") {
-        const assignedPlayerIndex = msg.player;
-        setPlayerIndex(assignedPlayerIndex);
-        setPlayersConnected(msg.players || 1);
-        console.log(`[CLIENT ASSIGNED] Player Index: ${assignedPlayerIndex}`);
+      let msg;
+      try {
+        msg = JSON.parse(evt.data);
+      } catch (e) {
+        console.warn("Invalid WS message", e, evt.data);
+        return;
       }
 
+      // -----------------------------
+      // 1) ASSIGNED
+      // -----------------------------
+      if (msg.type === "assigned") {
+        console.log("✔ Assigned player slot:", msg.player);
+        setPlayerIndex(msg.player);
+        setPlayersConnected(msg.players || 1);
+        return;
+      }
+
+      // -----------------------------
+      // 2) PLAYERS (count only)
+      // -----------------------------
       if (msg.type === "players") {
         setPlayersConnected(msg.players || 0);
-        if (!gameStarted && msg.players === 2) {
-          setGameMessage("2 players connected. Game ready to start.");
-        }
+        return;
       }
 
+      // -----------------------------
+      // 3) PLAYER LEFT
+      // -----------------------------
       if (msg.type === "player_left") {
         setGameMessage(`Player ${msg.slot + 1} left. Game reset.`);
-        resetGameState(); // Reset all game state
+        resetGameState();
+        return;
       }
 
-      if (msg.type === "game_start") {
-        console.log(
-          "[SERVER] Game Start Message Received. Setting gameStarted=true."
-        );
+      // From here onward, we MUST know playerIndex.
+      const myIndex = playerIndexRef.current;
 
-        // --- Set Initial Game State ---
-        // Setting gameStarted=true here immediately makes the component re-render
-        // with the game board, and the next onmessage closure (if triggered) will
-        // have the correct value.
+      if (myIndex === null || myIndex === undefined) {
+        console.log(
+          "[WS] Ignoring message because playerIndex is not assigned yet.",
+          msg
+        );
+        return; // 🔥 Prevents hand = []
+      }
+
+      // -----------------------------
+      // 4) GAME START
+      // -----------------------------
+      if (msg.type === "game_start") {
+        console.log("✔ Game Start Received");
+
         setGameStarted(true);
         setGameMessage(null);
         setSpecialJoker(msg.specialJoker || null);
         setDeckCount(msg.deckCount || 0);
         setDiscardPile(msg.discardPile || []);
-        setGroups([[], [], [], []]);
+        setGroups([[], [], [], []]); // 4 empty group buckets
         setPlayersConnected(msg.numPlayers || 2);
 
-        if (typeof msg.turn === "number") {
-          setTurn(msg.turn);
-        } else {
-          setTurn(0);
+        setTurn(typeof msg.turn === "number" ? msg.turn : 0);
+
+        // SAFELY set hand only for THIS player
+        if (msg.hands && Array.isArray(msg.hands[myIndex])) {
+          setHand(msg.hands[myIndex]);
         }
 
-        if (
-          typeof playerIndex === "number" &&
-          msg.hands &&
-          msg.hands[playerIndex]
-        ) {
-          setHand(msg.hands[playerIndex]);
-        } else {
-          setHand([]);
-        }
+        return;
       }
 
+      // -----------------------------
+      // 5) UPDATE
+      // -----------------------------
       if (msg.type === "update") {
-        if (typeof playerIndex === "number") {
-          const currentPlayerIndex = playerIndex;
-
-          console.log(
-            "[SERVER UPDATE] Received state for P" + (currentPlayerIndex + 1),
-            {
-              deckCount: msg.deckCount,
-              turn: msg.turn,
-              // We check the closure's value here:
-              gameStartedInClosure: gameStarted,
-            }
-          );
-
-          // Authoritative state update for shared variables
-          setDeckCount(msg.deckCount || 0);
-          setDiscardPile(msg.discardPile || []);
-          setPlayersConnected(msg.numPlayers || playersConnected);
-
-          if (typeof msg.turn === "number") {
-            setTurn(msg.turn);
-          }
-
-          // CRITICAL FIX: The check below ensures we only update HAND/GROUPS if
-          // the UI is actually supposed to be showing the game board.
-          if (gameStarted) {
-            // Now uses the fresh 'gameStarted' value thanks to dependency array
-            const currentGroups = msg.groups?.[currentPlayerIndex];
-            if (currentGroups && Array.isArray(currentGroups)) {
-              setGroups(currentGroups);
-            }
-
-            const currentHand = msg.hands?.[currentPlayerIndex];
-            if (currentHand) {
-              setHand(currentHand);
-            }
-            setGameMessage(null);
-          }
+        if (!gameStartedRef.current) {
+          console.log("[WS UPDATE] Ignored because game not started yet");
+          return;
         }
+
+        setDeckCount(msg.deckCount || 0);
+        setDiscardPile(msg.discardPile || []);
+        setTurn(typeof msg.turn === "number" ? msg.turn : turn);
+        setPlayersConnected(msg.players || playersConnectedRef.current);
+
+        // update groups
+        if (msg.groups && msg.groups[myIndex]) {
+          setGroups(msg.groups[myIndex]);
+        }
+
+        // update hand (only your own hand)
+        if (msg.hands && Array.isArray(msg.hands[myIndex])) {
+          setHand(msg.hands[myIndex]);
+        }
+
+        return;
       }
 
+      // -----------------------------
+      // 6) DECLARE / ERROR / WIN
+      // -----------------------------
       if (msg.type === "win") {
-        setGameMessage(
-          `Player ${msg.winner + 1} wins! Game will restart shortly.`
-        );
+        setGameMessage(`Player ${msg.winner + 1} wins!`);
         setGameStarted(false);
-        setTurn(null);
+        return;
       }
 
       if (msg.type === "invalid_declare") {
-        setGameMessage(
-          "Invalid declaration! Check your groups (1 Pure + 1 Dummy required). Turn passed."
-        );
+        setGameMessage("Invalid declaration! Turn passed.");
+        return;
       }
 
       if (msg.type === "error") {
@@ -490,18 +675,20 @@ export default function App() {
       }
     };
 
-    // Dependencies: Crucially includes gameStarted, playerIndex, and resetGameState
-    // to ensure the onmessage handler always has the latest state/functions.
+    ws.onerror = (err) => {
+      console.error("[WS] Error", err);
+      setGameMessage("WebSocket error. Check server or reload.");
+    };
+
     return () => {
       try {
-        if (wsRef.current) {
-          wsRef.current.close();
-        }
+        wsRef.current?.close();
+        wsRef.current = null;
       } catch (e) {
         console.log(e);
       }
     };
-  }, [playerIndex, gameStarted, resetGameState]); // <<< Dependency Array Fix
+  }, []);
 
   const send = (payload) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -699,7 +886,6 @@ export default function App() {
           backgroundColor: BACKGROUND_COLOR,
           color: "#1f2937", // Gray-800
           width: "100%",
-          overflowX: "hidden",
         }}
       >
         <h1
@@ -720,6 +906,7 @@ export default function App() {
             maxWidth: "1200px", // Set a maximum width for desktop comfort
             width: "100%",
             margin: "0 auto", // Center content on large screens
+            height: "100%",
           }}
         >
           {/* Status Area (Always visible) */}
@@ -1049,7 +1236,6 @@ export default function App() {
                       flex: 1,
                       padding: "16px",
                       ...styles.sectionCard,
-                      overflow: "hidden",
                     }}
                   >
                     <h3
@@ -1137,7 +1323,13 @@ export default function App() {
                     >
                       Groups ({totalCardsInGroups} / 13 cards grouped)
                     </h3>
-                    <div style={{ display: "flex", flexWrap: "wrap" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        height: "100%",
+                        flexWrap: "wrap",
+                      }}
+                    >
                       {groups.map((g, i) => (
                         <Bucket
                           key={i}
