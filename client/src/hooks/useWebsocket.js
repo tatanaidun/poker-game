@@ -1,3 +1,4 @@
+// src/hooks/useWebsocket.js
 import { useEffect, useRef, useState } from "react";
 
 export default function useWebSocket() {
@@ -9,7 +10,6 @@ export default function useWebSocket() {
   const playersConnectedRef = useRef(0);
 
   // Public state
-  const [serverHandLength, setServerHandLength] = useState(0); // <-- IMPORTANT
   const [playerIndex, setPlayerIndex] = useState(null);
   const [playersConnected, setPlayersConnected] = useState(0);
   const [gameStarted, setGameStarted] = useState(false);
@@ -24,6 +24,9 @@ export default function useWebSocket() {
 
   const [gameMessage, setGameMessage] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
+
+  // server-authoritative hand length (used for rules)
+  const [serverHandLength, setServerHandLength] = useState(0);
 
   // Keep refs synced
   useEffect(() => {
@@ -104,6 +107,7 @@ export default function useWebSocket() {
           setDiscardPile([]);
           setTurn(null);
           setSpecialJoker(null);
+          setServerHandLength(0);
 
           break;
         }
@@ -120,8 +124,9 @@ export default function useWebSocket() {
           const myIndex = playerIndexRef.current;
 
           if (msg.hands && typeof myIndex === "number") {
-            setHand(msg.hands[myIndex]);
-            setServerHandLength(msg.hands[myIndex].length); // <-- TRACK REAL LENGTH
+            const myHand = msg.hands[myIndex] || [];
+            setHand(myHand);
+            setServerHandLength(myHand.length);
           } else {
             setHand([]);
             setServerHandLength(0);
@@ -141,15 +146,14 @@ export default function useWebSocket() {
 
           if (typeof msg.turn === "number") setTurn(msg.turn);
 
-          // ALWAYS update hand + groups (do NOT gate with gameStarted)
+          // ALWAYS update my hand + groups from server
           if (typeof myIndex === "number") {
-            // Update HAND
             if (msg.hands?.[myIndex]) {
-              setHand(msg.hands[myIndex]);
-              setServerHandLength(msg.hands[myIndex].length); // <-- IMPORTANT FIX
+              const myHand = msg.hands[myIndex];
+              setHand(myHand);
+              setServerHandLength(myHand.length);
             }
 
-            // Update GROUPS
             if (msg.groups?.[myIndex]) {
               setGroups(msg.groups[myIndex]);
             }
@@ -223,7 +227,7 @@ export default function useWebSocket() {
     specialJoker,
 
     gameMessage,
-    serverHandLength, // <-- EXPORTED FOR PROPER BUTTON LOGIC
+    serverHandLength, // authoritative count from server
 
     // Local mutators used by App DnD logic
     setHand,

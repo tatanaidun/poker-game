@@ -19,17 +19,13 @@ const RANKS = [
 
 function createDeck() {
   const deck = [];
-
   for (const suit of SUITS) {
     for (const rank of RANKS) {
       deck.push({ id: uuidv4(), suit, rank });
     }
   }
-
-  // Printed jokers
   deck.push({ id: uuidv4(), suit: null, rank: "JOKER" });
   deck.push({ id: uuidv4(), suit: null, rank: "JOKER" });
-
   return deck;
 }
 
@@ -41,13 +37,4 @@ function shuffle(deck) {
   return deck;
 }
 
-function dealHands(deck) {
-  const hands = [[], []];
-  for (let i = 0; i < 13; i++) {
-    hands[0].push(deck.pop());
-    hands[1].push(deck.pop());
-  }
-  return hands;
-}
-
-module.exports = { createDeck, shuffle, dealHands };
+module.exports = { createDeck, shuffle };

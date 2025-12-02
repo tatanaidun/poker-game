@@ -1,33 +1,91 @@
-const { room, send, broadcast } = require("./gameState");
-const deckModule = require("./deck");
+const state = require("./gameState");
+const { createDeck, shuffle } = require("./deck");
 const {
-  startGame,
-  handleDraw,
-  handlePickDiscard,
-  handleDiscard,
-  handleDeclaration,
-  broadcastState,
-  handleMoveGroupToHand,
+  draw,
+  pickDiscard,
+  discard,
+  updateGroups,
+  moveGroupToHand,
 } = require("./actions");
 
+// --------------------------------------------------------
+// Broadcast helpers
+// --------------------------------------------------------
+function send(ws, msg) {
+  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
+}
+
+function broadcast(msg) {
+  state.players.forEach((p) => send(p.ws, { ...msg, playerIndex: p.index }));
+}
+
+function broadcastState() {
+  broadcast({
+    type: "update",
+    hands: state.hands,
+    groups: state.groups,
+    deckCount: state.deck.length,
+    discardPile: state.discardPile,
+    turn: state.turn,
+    players: state.players.length,
+  });
+}
+
+// --------------------------------------------------------
+// Game Start
+// --------------------------------------------------------
+function startGame() {
+  const deck = shuffle(createDeck());
+  const hands = [[], []];
+
+  for (let i = 0; i < 13; i++) {
+    hands[0].push(deck.pop());
+    hands[1].push(deck.pop());
+  }
+
+  const mid = Math.floor(deck.length / 2);
+  state.specialJoker = deck[mid];
+
+  const firstOpen = deck.pop();
+  state.discardPile = [firstOpen];
+
+  state.deck = deck;
+  state.hands = hands;
+  state.groups = [
+    [[], [], [], []],
+    [[], [], [], []],
+  ];
+  state.turn = 0;
+  state.state = "playing";
+
+  broadcast({
+    type: "game_start",
+    hands: state.hands,
+    deckCount: deck.length,
+    discardPile: state.discardPile,
+    turn: 0,
+    specialJoker: state.specialJoker,
+    players: state.players.length,
+  });
+}
+
+// --------------------------------------------------------
+// onConnection
+// --------------------------------------------------------
 function onConnection(ws) {
-  console.log("🔵 Client connected");
-  if (room.players.length >= 2) {
+  if (state.players.length >= 2) {
     send(ws, { type: "full" });
     ws.close();
     return;
   }
 
-  const slot = room.players.length;
-  room.players.push({ ws, index: slot });
-  ws.playerIndex = slot;
+  const slot = state.players.length;
+  state.players.push({ ws, index: slot });
 
-  send(ws, { type: "assigned", player: slot, players: room.players.length });
-  broadcast(room, { type: "players", players: room.players.length });
+  send(ws, { type: "assigned", player: slot, players: state.players.length });
+  broadcast({ type: "players", players: state.players.length });
 
-  if (room.players.length === 2) {
-    startGame(room, deckModule);
-  }
+  if (state.players.length === 2) startGame();
 
   ws.on("message", (raw) => {
     let msg;
@@ -37,79 +95,68 @@ function onConnection(ws) {
       return;
     }
 
-    const pi = ws.playerIndex;
+    const pi = state.players.find((p) => p.ws === ws)?.index;
     if (pi == null) return;
-
-    if (room.state !== "playing" && msg.type !== "join_room") return;
 
     switch (msg.type) {
       case "draw":
-        return handleDraw(room, pi);
+        draw(pi);
+        broadcastState();
+        break;
+
       case "pick_discard":
-        return handlePickDiscard(room, pi);
+        pickDiscard(pi);
+        broadcastState();
+        break;
+
       case "discard":
-        return handleDiscard(room, pi, msg.cardId);
+        discard(pi, msg.cardId);
+        broadcastState();
+        break;
+
+      case "group":
+        updateGroups(pi, msg.groups);
+        broadcastState();
+        break;
+
+      case "move_group_to_hand":
+        moveGroupToHand(pi, msg.cardId, msg.fromGroupIndex, msg.toHandOrder);
+        broadcastState();
+        break;
+
+      case "sync_hand":
+        // Safe reorder without duplication
+        state.hands[pi] = msg.hand
+          .map((id) =>
+            [...state.hands[pi], ...state.groups[pi].flat()].find(
+              (c) => c.id === id
+            )
+          )
+          .filter(Boolean);
+        broadcastState();
+        break;
+
       case "declare":
-        return handleDeclaration(room, pi, ws);
-
-      case "group": {
-        if (Array.isArray(msg.groups)) {
-          room.groups[pi] = msg.groups;
-          broadcastState(room);
-        }
+        // leaving declare for later — not relevant now
         break;
-      }
-
-      case "reorder": {
-        if (!Array.isArray(msg.order)) break;
-
-        const map = {};
-        room.hands[pi].forEach((c) => (map[c.id] = c));
-
-        const newHand = msg.order.filter((id) => map[id]).map((id) => map[id]);
-
-        room.hands[pi] = newHand;
-        broadcastState(room);
-        break;
-      }
-
-      case "move_group_to_hand": {
-        handleMoveGroupToHand(room, pi, msg);
-        break;
-      }
-
-      case "sync_hand": {
-        const inv = [...room.hands[pi], ...room.groups[pi].flat()];
-        const map = new Map(inv.map((c) => [c.id, c]));
-
-        const verified = msg.hand
-          .filter((id) => map.has(id))
-          .map((id) => map.get(id));
-
-        room.hands[pi] = verified;
-        broadcastState(room);
-        break;
-      }
     }
   });
 
   ws.on("close", () => {
-    const left = ws.playerIndex;
-    room.players = room.players.filter((p) => p.ws !== ws);
+    // full reset
+    state.players = [];
+    state.hands = [[], []];
+    state.groups = [
+      [[], [], [], []],
+      [[], [], [], []],
+    ];
+    state.deck = [];
+    state.discardPile = [];
+    state.turn = 0;
+    state.specialJoker = null;
+    state.state = "waiting";
 
-    Object.assign(room, {
-      hands: [[], []],
-      deck: [],
-      discardPile: [],
-      turn: 0,
-      groups: [[], []],
-      specialJoker: null,
-      state: "waiting",
-      winner: null,
-    });
-
-    broadcast(room, { type: "players", players: room.players.length });
-    broadcast(room, { type: "player_left", slot: left });
+    broadcast({ type: "players", players: 0 });
   });
 }
 

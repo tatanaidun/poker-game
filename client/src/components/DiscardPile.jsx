@@ -1,10 +1,12 @@
+// src/components/DiscardPile.jsx
 import styles from "./styles/DiscardPile.module.css";
-// DiscardPile.jsx
+
 export default function DiscardPile({
   discardPile,
   canPick,
   sendMessage,
   specialJoker,
+  setCardPicked,
 }) {
   const top = discardPile[0] || null;
 
@@ -24,7 +26,10 @@ export default function DiscardPile({
       <button
         type="button"
         disabled={!canPick}
-        onClick={() => sendMessage({ type: "pick_discard" })}
+        onClick={() => {
+          sendMessage({ type: "pick_discard" });
+          setCardPicked(true);
+        }}
         className={styles.button}
       >
         Pick Top

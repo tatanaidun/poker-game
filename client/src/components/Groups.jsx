@@ -16,10 +16,8 @@ function GroupBucket({
     drop: (item) => {
       if (item.source !== "hand") return;
 
-      // Prefer multi-ids (new flow)
       let ids = Array.isArray(item.ids) ? item.ids : [];
 
-      // Fallback: old style with item.card
       if (!ids.length && item.card && item.card.id) {
         ids = [item.card.id];
       }

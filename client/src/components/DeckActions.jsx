@@ -1,6 +1,12 @@
+// src/components/DeckActions.jsx
 import styles from "./styles/DeckActions.module.css";
 
-export default function DeckActions({ deckCount, canDraw, sendMessage }) {
+export default function DeckActions({
+  deckCount,
+  canDraw,
+  sendMessage,
+  setCardPicked,
+}) {
   return (
     <div className={styles.container}>
       <div className={styles.label}>Deck</div>
@@ -10,7 +16,11 @@ export default function DeckActions({ deckCount, canDraw, sendMessage }) {
       <button
         className={`${styles.btn} ${!canDraw ? styles.btnDisabled : ""}`}
         disabled={!canDraw}
-        onClick={() => sendMessage({ type: "draw" })}
+        onClick={() => {
+          sendMessage({ type: "draw" });
+          setCardPicked(true);
+        }}
+        type="button"
       >
         Draw Card
       </button>

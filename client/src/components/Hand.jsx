@@ -32,11 +32,13 @@ function HandCard({
   const [, dropRef] = useDrop({
     accept: CARD_ITEM,
     drop: (item) => {
-      // Only reorder if it's a single-card drag inside hand
       if (item.source !== "hand") return;
       if (!item.singleId || item.ids.length !== 1) return;
       if (item.fromIndex === index) return;
       onReorderHand(item.fromIndex, index);
+      // update the item so subsequent drops know its new index
+      // (this stays within react-dnd's mutable item contract)
+      // eslint-disable-next-line no-param-reassign
       item.fromIndex = index;
     },
   });
