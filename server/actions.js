@@ -1,3 +1,4 @@
+// actions.js
 const state = require("./gameState");
 
 // ---------- DRAW ----------
@@ -30,63 +31,83 @@ function discard(pi, cardId) {
 
   const [card] = state.hands[pi].splice(idx, 1);
   state.discardPile.unshift(card);
+
   state.turn = state.turn === 0 ? 1 : 0;
 }
 
-// ---------- UPDATE GROUPS ----------
+// ---------- UPDATE GROUPS (HAND ↔ GROUP OWNERSHIP FIX) ----------
 function updateGroups(pi, groups) {
-  // always deep replace
-  state.groups[pi] = groups.map((g) => [...g]);
-}
+  if (!Array.isArray(groups)) return;
 
-// ---------- MOVE GROUP → HAND ----------
-function moveGroupToHand(pi, cardId, fromGroupIndex, newHandOrder) {
-  let found = null;
+  // Normalize groups to exactly 4 arrays
+  const normalized = Array.from({ length: 4 }, (_, i) =>
+    Array.isArray(groups[i]) ? [...groups[i]] : []
+  );
 
-  // remove card from groups
-  const group = state.groups[pi][fromGroupIndex];
-  const idx = group.findIndex((c) => c.id === cardId);
-  if (idx !== -1) {
-    [found] = group.splice(idx, 1);
+  // All card ids that are now in groups
+  const groupedIds = new Set(normalized.flat().map((c) => c.id));
+
+  // Remove those from hand
+  if (groupedIds.size > 0) {
+    state.hands[pi] = state.hands[pi].filter((c) => !groupedIds.has(c.id));
   }
 
-  if (!found) {
-    // fallback search
-    for (const g of state.groups[pi]) {
-      const index = g.findIndex((c) => c.id === cardId);
-      if (index !== -1) {
-        [found] = g.splice(index, 1);
+  // Save groups
+  state.groups[pi] = normalized;
+}
+
+// ---------- MOVE GROUP → HAND (CLICK ON CARD IN GROUP) ----------
+function moveGroupToHand(pi, cardId, fromGroupIndex, newHandOrder) {
+  let card = null;
+
+  // 1) Remove from specified group if present
+  if (typeof fromGroupIndex === "number" && state.groups[pi][fromGroupIndex]) {
+    const group = state.groups[pi][fromGroupIndex];
+    const idx = group.findIndex((c) => c.id === cardId);
+    if (idx !== -1) {
+      [card] = group.splice(idx, 1);
+    }
+  }
+
+  // 2) Fallback: remove from any group
+  if (!card) {
+    for (let gi = 0; gi < state.groups[pi].length; gi++) {
+      const g = state.groups[pi][gi];
+      const idx = g.findIndex((c) => c.id === cardId);
+      if (idx !== -1) {
+        [card] = g.splice(idx, 1);
         break;
       }
     }
   }
 
-  if (!found) return; // safety
+  if (!card) return;
 
-  const inventory = [...state.hands[pi], ...state.groups[pi].flat(), found];
+  // 3) Ensure card is not in hand already
+  state.hands[pi] = state.hands[pi].filter((c) => c.id !== cardId);
 
-  const inventoryMap = new Map(inventory.map((c) => [c.id, c]));
+  // 4) Build new hand from order + existing cards
+  const map = new Map();
+  map.set(card.id, card);
+  for (const c of state.hands[pi]) map.set(c.id, c);
 
   const newHand = [];
-  for (const id of newHandOrder) {
-    if (inventoryMap.has(id)) {
-      newHand.push(inventoryMap.get(id));
-      inventoryMap.delete(id);
+  if (Array.isArray(newHandOrder) && newHandOrder.length) {
+    for (const id of newHandOrder) {
+      const found = map.get(id);
+      if (found) {
+        newHand.push(found);
+        map.delete(id);
+      }
     }
   }
 
-  // append leftovers safely
-  for (const c of inventoryMap.values()) {
+  // Append any leftovers (defensive; should usually be none)
+  for (const c of map.values()) {
     if (!newHand.some((x) => x.id === c.id)) newHand.push(c);
   }
 
-  // dedupe
-  const seen = new Set();
-  state.hands[pi] = newHand.filter((c) => {
-    if (seen.has(c.id)) return false;
-    seen.add(c.id);
-    return true;
-  });
+  state.hands[pi] = newHand;
 }
 
 module.exports = {

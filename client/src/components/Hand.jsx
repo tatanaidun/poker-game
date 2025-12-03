@@ -12,8 +12,8 @@ function HandCard({
   onToggleSelect,
   onReorderHand,
   selectedIds,
+  highlightCardId,
 }) {
-  // Drag: either all selected cards, or just this one
   const [{ isDragging }, dragRef] = useDrag({
     type: CARD_ITEM,
     item: () => ({
@@ -28,7 +28,6 @@ function HandCard({
     }),
   });
 
-  // Drop: only used for in-hand reorder when dragging a single card
   const [, dropRef] = useDrop({
     accept: CARD_ITEM,
     drop: (item) => {
@@ -36,9 +35,6 @@ function HandCard({
       if (!item.singleId || item.ids.length !== 1) return;
       if (item.fromIndex === index) return;
       onReorderHand(item.fromIndex, index);
-      // update the item so subsequent drops know its new index
-      // (this stays within react-dnd's mutable item contract)
-      // eslint-disable-next-line no-param-reassign
       item.fromIndex = index;
     },
   });
@@ -51,10 +47,14 @@ function HandCard({
     [dragRef, dropRef]
   );
 
+  const isHighlighted = highlightCardId === card.id;
+
   return (
     <div
       ref={setRef}
-      className={`${styles.card} ${isSelected ? styles.cardSelected : ""}`}
+      className={`${styles.card} ${isSelected ? styles.cardSelected : ""} ${
+        isHighlighted ? styles.cardHighlighted : ""
+      }`}
       style={{ opacity: isDragging ? 0.35 : 1 }}
       onClick={() => onToggleSelect(card.id)}
       role="button"
@@ -73,6 +73,7 @@ export default function Hand({
   selectedIds,
   onToggleSelect,
   onReorderHand,
+  highlightCardId,
 }) {
   const isMyTurn = turn === playerIndex;
 
@@ -93,6 +94,7 @@ export default function Hand({
             selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
             onReorderHand={onReorderHand}
+            highlightCardId={highlightCardId}
           />
         ))}
 

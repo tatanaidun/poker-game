@@ -29,34 +29,30 @@ export default function App() {
     specialJoker,
     gameMessage,
     serverHandLength,
+    lastDrawnCardId,
     setHand,
     setGroups,
     sendMessage,
   } = useWebSocket();
-  console.log("serverHandLength", serverHandLength);
-  const [cardPicked, setCardPicked] = useState(false);
+
   const [selectedIds, setSelectedIds] = useState([]);
-
+  const [cardPicked, setCardPicked] = useState(false);
   const groupedCount = groups.flat().length;
-  const totalCardsWithPlayer = hand.length + groupedCount; // +1 for the card in hand
-
-  console.log("totalCardsWithPlayer", totalCardsWithPlayer);
-  // ── Turn helpers ──────────────────────────────────────────────────────
   const isMyTurn = playerIndex !== null && turn === playerIndex;
 
-  // ── Rule helpers (use serverHandLength, not local counts) ─────────────
+  // --- Button conditions based purely on SERVER hand length ---
   const canDraw =
     isMyTurn &&
-    gameStarted &&
     !cardPicked &&
+    gameStarted &&
     playersConnected === 2 &&
     serverHandLength === 13 &&
     deckCount > 0;
 
   const canPickDiscard =
     isMyTurn &&
-    !cardPicked &&
     gameStarted &&
+    !cardPicked &&
     playersConnected === 2 &&
     serverHandLength === 13 &&
     discardPile.length > 0;
@@ -67,23 +63,28 @@ export default function App() {
     playersConnected === 2 &&
     serverHandLength === 14 &&
     selectedIds.length === 1;
-  console.log(
-    isMyTurn,
-    gameStarted,
-    playersConnected,
-    totalCardsWithPlayer,
-    groupedCount,
-    hand.length
-  );
+  console.log("serverHandLength", serverHandLength);
   const canDeclare =
     isMyTurn &&
     gameStarted &&
     playersConnected === 2 &&
-    totalCardsWithPlayer === 14 &&
     groupedCount === 13 &&
-    hand.length === 1;
-  console.log(canDeclare);
-  // ── Selection ─────────────────────────────────────────────────────────
+    serverHandLength === 1;
+  console.log(
+    canDeclare,
+    isMyTurn,
+    gameStarted,
+    playersConnected,
+    groupedCount,
+    serverHandLength
+  );
+  useEffect(() => {
+    if (turn === playerIndex) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCardPicked((prevState) => !prevState);
+    }
+  }, [setCardPicked, turn, playerIndex]);
+  // --- Selection in hand ---
   const handleToggleSelect = (cardId) => {
     setSelectedIds((prev) =>
       prev.includes(cardId)
@@ -91,12 +92,6 @@ export default function App() {
         : [...prev, cardId]
     );
   };
-  useEffect(() => {
-    if (turn === playerIndex) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setCardPicked((prevState) => !prevState);
-    }
-  }, [turn, playerIndex, setCardPicked]);
 
   const handleDiscardSelected = () => {
     if (!canDiscard) return;
@@ -108,7 +103,7 @@ export default function App() {
     setSelectedIds([]);
   };
 
-  // ── DnD: hand → groups (multi-select) ─────────────────────────────────
+  // --- DnD: hand → groups (multi-select) ---
   const handleMoveCardsFromHandToGroup = (ids, targetGroupIndex) => {
     const movingCards = hand.filter((c) => ids.includes(c.id));
     if (!movingCards.length) return;
@@ -120,16 +115,15 @@ export default function App() {
 
     setHand(remainingHand);
     setGroups(newGroups);
-    setSelectedIds([]); // clear selection
+    setSelectedIds([]);
 
     // Sync with server
     sendMessage({ type: "sync_hand", hand: remainingHand.map((c) => c.id) });
     sendMessage({ type: "group", groups: newGroups });
   };
 
-  // ── Hand → Hand reordering (drag inside hand) ────────────────────────
+  // --- Hand ↔ hand reorder (single card drag within hand) ---
   const handleReorderHand = (fromIndex, toIndex) => {
-    if (fromIndex === toIndex) return;
     const updated = [...hand];
     const [moved] = updated.splice(fromIndex, 1);
     updated.splice(toIndex, 0, moved);
@@ -138,12 +132,9 @@ export default function App() {
     sendMessage({ type: "reorder", order: updated.map((c) => c.id) });
   };
 
-  // ── group → hand (click) ─────────────────────────────────────────────
+  // --- group → hand (click card in group) ---
   const handleReturnCardToHand = (card, fromGroupIndex) => {
-    if (!isConnected) {
-      console.warn("Ignoring move group→hand: WS not connected");
-      return;
-    }
+    if (!isConnected) return;
 
     const newGroups = groups.map((g, idx) =>
       idx === fromGroupIndex ? g.filter((c) => c.id !== card.id) : g
@@ -161,12 +152,9 @@ export default function App() {
     });
   };
 
-  // ── Sort hand ────────────────────────────────────────────────────────
+  // --- Sort hand button ---
   const handleSortHand = () => {
-    if (!isConnected) {
-      console.warn("Ignoring sort: WS not connected");
-      return;
-    }
+    if (!isConnected) return;
 
     const SUIT_ORDER = ["♠", "♥", "♦", "♣"];
     const RANK_ORDER = [
@@ -200,45 +188,30 @@ export default function App() {
     sendMessage({ type: "reorder", order: sorted.map((c) => c.id) });
   };
 
-  // ── Declare ──────────────────────────────────────────────────────────
+  // --- Declare ---
   const handleDeclare = () => {
-    if (!isConnected) {
-      console.warn("Ignoring declare: WS not connected");
-      return;
-    }
-    if (!isMyTurn) return;
+    if (!isConnected || !isMyTurn) return;
 
-    const totalCards = hand.length + groups.flat().length;
-
-    if (totalCards !== 14) {
-      alert("You must have exactly 14 cards before declaring.");
-      return;
-    }
-
-    if (groups.flat().length !== 13) {
-      alert("13 cards must be arranged into groups before declaring.");
-      return;
-    }
-
-    if (hand.length !== 1) {
-      alert("Leave exactly one card in hand before declaring.");
+    if (groupedCount !== 13 || serverHandLength !== 1) {
+      alert(
+        "To declare: 13 cards must be grouped and exactly 1 card left in hand."
+      );
       return;
     }
 
     sendMessage({
       type: "declare",
       groups,
-      finalDiscard: hand[0],
+      finalDiscard: hand[0] || null,
     });
   };
 
-  // ── RENDER ──────────────────────────────────────────────────────────
+  // --- RENDER ---
   return (
     <DndProvider backend={HTML5Backend}>
       <div className={styles.appContainer}>
         <Header playersConnected={playersConnected} />
 
-        {/* Connection / waiting info */}
         {!isConnected && (
           <div className={styles.waitingBox}>
             <h2>Connecting to game server…</h2>
@@ -254,7 +227,6 @@ export default function App() {
           </div>
         )}
 
-        {/* MAIN GAME UI */}
         {gameStarted && isConnected && (
           <main className={styles.main}>
             <TurnIndicator
@@ -268,6 +240,7 @@ export default function App() {
               <DeckActions
                 deckCount={deckCount}
                 canDraw={canDraw}
+                canPickDiscard={canPickDiscard}
                 sendMessage={sendMessage}
                 setCardPicked={setCardPicked}
               />
@@ -280,7 +253,6 @@ export default function App() {
                 setCardPicked={setCardPicked}
               />
 
-              {/* Sort / Discard / Declare */}
               <div className={styles.actionBox}>
                 <button
                   type="button"
@@ -332,6 +304,7 @@ export default function App() {
               selectedIds={selectedIds}
               onToggleSelect={handleToggleSelect}
               onReorderHand={handleReorderHand}
+              highlightCardId={lastDrawnCardId}
             />
           </main>
         )}

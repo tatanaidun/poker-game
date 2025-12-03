@@ -89,3 +89,8 @@
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.3);
   background: #e0edff;
 }
+
+.cardHighlighted {
+  border: 2px solid #dc2626; /* red-600 */
+  box-shadow: 0 0 6px rgba(220, 38, 38, 0.6);
+}

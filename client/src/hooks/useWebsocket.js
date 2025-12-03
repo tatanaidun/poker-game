@@ -8,8 +8,12 @@ export default function useWebSocket() {
   const playerIndexRef = useRef(null);
   const gameStartedRef = useRef(false);
   const playersConnectedRef = useRef(0);
+  const prevHandRef = useRef([]); // for detecting newly drawn card
 
   // Public state
+  const [serverHandLength, setServerHandLength] = useState(0);
+  const [lastDrawnCardId, setLastDrawnCardId] = useState(null);
+
   const [playerIndex, setPlayerIndex] = useState(null);
   const [playersConnected, setPlayersConnected] = useState(0);
   const [gameStarted, setGameStarted] = useState(false);
@@ -24,9 +28,6 @@ export default function useWebSocket() {
 
   const [gameMessage, setGameMessage] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
-
-  // server-authoritative hand length (used for rules)
-  const [serverHandLength, setServerHandLength] = useState(0);
 
   // Keep refs synced
   useEffect(() => {
@@ -48,6 +49,7 @@ export default function useWebSocket() {
       console.warn("WS not open. Dropping message:", data);
       return;
     }
+    console.log("sending this data", data);
     ws.send(JSON.stringify(data));
   };
 
@@ -108,7 +110,8 @@ export default function useWebSocket() {
           setTurn(null);
           setSpecialJoker(null);
           setServerHandLength(0);
-
+          setLastDrawnCardId(null);
+          prevHandRef.current = [];
           break;
         }
 
@@ -122,17 +125,19 @@ export default function useWebSocket() {
           setTurn(typeof msg.turn === "number" ? msg.turn : 0);
 
           const myIndex = playerIndexRef.current;
-
           if (msg.hands && typeof myIndex === "number") {
             const myHand = msg.hands[myIndex] || [];
             setHand(myHand);
             setServerHandLength(myHand.length);
+            prevHandRef.current = myHand;
           } else {
             setHand([]);
             setServerHandLength(0);
+            prevHandRef.current = [];
           }
 
           setGroups([[], [], [], []]);
+          setLastDrawnCardId(null);
           break;
         }
 
@@ -144,16 +149,31 @@ export default function useWebSocket() {
           setDiscardPile(msg.discardPile || []);
           setPlayersConnected(msg.players || playersConnectedRef.current);
 
-          if (typeof msg.turn === "number") setTurn(msg.turn);
+          if (typeof msg.turn === "number") {
+            setTurn(msg.turn);
+          }
 
-          // ALWAYS update my hand + groups from server
           if (typeof myIndex === "number") {
+            // HAND
             if (msg.hands?.[myIndex]) {
-              const myHand = msg.hands[myIndex];
-              setHand(myHand);
-              setServerHandLength(myHand.length);
+              const newHand = msg.hands[myIndex] || [];
+              const prevHand = prevHandRef.current || [];
+
+              // Detect newly drawn card (for highlight)
+              const prevIds = new Set(prevHand.map((c) => c.id));
+              if (newHand.length > prevHand.length) {
+                const added = newHand.find((c) => !prevIds.has(c.id));
+                if (added) {
+                  setLastDrawnCardId(added.id);
+                }
+              }
+
+              setHand(newHand);
+              setServerHandLength(newHand.length);
+              prevHandRef.current = newHand;
             }
 
+            // GROUPS
             if (msg.groups?.[myIndex]) {
               setGroups(msg.groups[myIndex]);
             }
@@ -166,6 +186,7 @@ export default function useWebSocket() {
           setGameMessage(`Player ${msg.winner + 1} wins!`);
           setGameStarted(false);
           setTurn(null);
+          setLastDrawnCardId(null);
           break;
         }
 
@@ -227,7 +248,8 @@ export default function useWebSocket() {
     specialJoker,
 
     gameMessage,
-    serverHandLength, // authoritative count from server
+    serverHandLength,
+    lastDrawnCardId,
 
     // Local mutators used by App DnD logic
     setHand,
