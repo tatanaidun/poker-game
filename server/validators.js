@@ -1,3 +1,5 @@
+// validators.js
+
 const RANK_ORDER = [
   "A",
   "2",
@@ -14,28 +16,34 @@ const RANK_ORDER = [
   "K",
 ];
 
+// Convert rank → number for sorting
+function rankValue(rank) {
+  return RANK_ORDER.indexOf(rank);
+}
+
+// Decide if card is a joker
+function isJoker(card, special) {
+  // Printed joker
+  if (card.rank === "JOKER") return true;
+
+  // If printed joker was chosen → all Aces are jokers
+  if (special.rank === "A" && special.suit === "ALL") {
+    return card.rank === "A";
+  }
+
+  // Otherwise → jokers are all cards with same rank as special
+  return card.rank === special.rank;
+}
+
 function checkGroupValidity(group, specialJoker) {
   if (group.length < 3) return { valid: false, type: null };
 
-  // --- FIXED isJoker ---
-  const isJoker = (card, special) => {
-    // Printed jokers
-    if (card.rank === "JOKER") return true;
-
-    // If printed joker was chosen → ALL Aces are jokers
-    if (special.rank === "A" && special.suit === "ALL") {
-      return card.rank === "A";
-    }
-
-    // Otherwise → jokers are all cards with same rank as the special
-    return card.rank === special.rank;
-  };
-
-  // --- FIXED FILTERING ---
   const jokers = group.filter((c) => isJoker(c, specialJoker));
   const actual = group.filter((c) => !isJoker(c, specialJoker));
 
-  // SET
+  // --------------------------------------------------
+  // 1) VALIDATE SET (AAAA or K♣ K♦ K♥ K♠)
+  // --------------------------------------------------
   if (actual.length > 0 && actual.every((c) => c.rank === actual[0].rank)) {
     const suits = new Set(actual.map((c) => c.suit));
     if (suits.size === actual.length && group.length <= 4) {
@@ -43,49 +51,69 @@ function checkGroupValidity(group, specialJoker) {
     }
   }
 
-  // SEQUENCE
-  const suits = actual.map((c) => c.suit).filter(Boolean);
-  if (suits.length && new Set(suits).size !== 1)
-    return { valid: false, type: null };
+  // --------------------------------------------------
+  // 2) VALIDATE SEQUENCE (same suit)
+  // --------------------------------------------------
+  if (actual.length > 0) {
+    const suits = actual.map((c) => c.suit);
+    if (new Set(suits).size !== 1) {
+      return { valid: false, type: null }; // sequence must be same suit
+    }
+  }
 
+  // Sort by rank
   const sorted = [...actual].sort(
-    (a, b) => RANK_ORDER.indexOf(a.rank) - RANK_ORDER.indexOf(b.rank)
+    (a, b) => rankValue(a.rank) - rankValue(b.rank)
   );
 
+  // A can be HIGH only if Q + K exist
   const hasQ = sorted.some((c) => c.rank === "Q");
   const hasK = sorted.some((c) => c.rank === "K");
-  const hasA = sorted.some((c) => c.rank === "A");
 
-  const ranks = sorted
-    .map((c) => RANK_ORDER.indexOf(c.rank))
-    .map((i) => (i === 0 && hasQ && hasK ? 13 : i))
+  const values = sorted
+    .map((card) => {
+      // If Ace is high (Q-K-A)
+      if (card.rank === "A" && hasQ && hasK) return 13;
+      return rankValue(card.rank);
+    })
     .sort((a, b) => a - b);
 
-  let required = 0;
-  for (let i = 0; i < ranks.length - 1; i++) {
-    const diff = ranks[i + 1] - ranks[i];
-    if (diff === 1) continue;
-    if (diff > 1) required += diff - 1;
-    else return { valid: false, type: null };
+  // Calculate needed jokers to fill gaps
+  let needed = 0;
+
+  for (let i = 0; i < values.length - 1; i++) {
+    const a = values[i];
+    const b = values[i + 1];
+
+    const diff = b - a;
+
+    if (diff === 1) continue; // perfect adjacency
+    if (diff < 1) return { valid: false, type: null }; // duplicate or reverse
+    needed += diff - 1; // count missing ranks
   }
 
-  if (required <= jokers.length) {
-    return { valid: true, type: jokers.length ? "impure" : "pure" };
-  }
+  if (needed > jokers.length) return { valid: false, type: null };
 
-  return { valid: false, type: null };
+  return {
+    valid: true,
+    type: jokers.length ? "impure" : "pure",
+  };
 }
 
-function isValidRummyDeclaration(groups, joker) {
+// --------------------------------------------------
+// DECLARATION VALIDATION (13 cards, 1 pure + 1 more sequence)
+// --------------------------------------------------
+
+function isValidRummyDeclaration(groups, specialJoker) {
+  let total = 0;
   let hasPure = false;
   let hasSecond = false;
-  let total = 0;
 
   for (const g of groups) {
     if (g.length === 0) continue;
     total += g.length;
 
-    const { valid, type } = checkGroupValidity(g, joker);
+    const { valid, type } = checkGroupValidity(g, specialJoker);
     if (!valid) return false;
 
     if (type === "pure") {
