@@ -17,14 +17,23 @@ const RANK_ORDER = [
 function checkGroupValidity(group, specialJoker) {
   if (group.length < 3) return { valid: false, type: null };
 
-  const isJoker = (card) =>
-    card.rank === "JOKER" ||
-    (specialJoker &&
-      card.rank === specialJoker.rank &&
-      card.suit !== specialJoker.suit);
+  // --- FIXED isJoker ---
+  const isJoker = (card, special) => {
+    // Printed jokers
+    if (card.rank === "JOKER") return true;
 
-  const jokers = group.filter(isJoker);
-  const actual = group.filter((c) => !isJoker(c));
+    // If printed joker was chosen → ALL Aces are jokers
+    if (special.rank === "A" && special.suit === "ALL") {
+      return card.rank === "A";
+    }
+
+    // Otherwise → jokers are all cards with same rank as the special
+    return card.rank === special.rank;
+  };
+
+  // --- FIXED FILTERING ---
+  const jokers = group.filter((c) => isJoker(c, specialJoker));
+  const actual = group.filter((c) => !isJoker(c, specialJoker));
 
   // SET
   if (actual.length > 0 && actual.every((c) => c.rank === actual[0].rank)) {

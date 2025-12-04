@@ -1,7 +1,7 @@
 // src/hooks/useWebsocket.js
 import { useEffect, useRef, useState } from "react";
 
-export default function useWebSocket() {
+export default function useWebSocket(roomId) {
   const wsRef = useRef(null);
 
   // Avoid stale closures
@@ -9,7 +9,9 @@ export default function useWebSocket() {
   const gameStartedRef = useRef(false);
   const playersConnectedRef = useRef(0);
   const prevHandRef = useRef([]); // for detecting newly drawn card
-  const pendingHandsRef = useRef(null);
+  const pendingHandsRef = useRef(null); // hands received before playerIndex is known
+  const [opponentLeft, setOpponentLeft] = useState(false);
+
   // Public state
   const [serverHandLength, setServerHandLength] = useState(0);
   const [lastDrawnCardId, setLastDrawnCardId] = useState(null);
@@ -28,6 +30,12 @@ export default function useWebSocket() {
 
   const [gameMessage, setGameMessage] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [gameFinished, setGameFinished] = useState(false);
+  const gameFinishedRef = useRef(false);
+
+  useEffect(() => {
+    gameFinishedRef.current = gameFinished;
+  }, [gameFinished]);
 
   // Keep refs synced
   useEffect(() => {
@@ -49,35 +57,65 @@ export default function useWebSocket() {
       console.warn("WS not open. Dropping message:", data);
       return;
     }
-    console.log("sending this data", data);
+    console.log("[WS SEND]", data);
     ws.send(JSON.stringify(data));
   };
 
+  // If we got full hands *before* playerIndex was known, apply them once we know it
   useEffect(() => {
     if (playerIndex !== null && pendingHandsRef.current) {
       const full = pendingHandsRef.current;
       if (full[playerIndex]) {
         setHand(full[playerIndex]);
         setServerHandLength(full[playerIndex].length);
+        prevHandRef.current = full[playerIndex];
       }
       pendingHandsRef.current = null; // consume
     }
   }, [playerIndex]);
 
-  // Initialize WebSocket ONCE
+  // Initialize WebSocket WHEN roomId is present
   useEffect(() => {
-    console.log("Creating WebSocket connection ws://localhost:8080");
-    const ws = new WebSocket("ws://localhost:8080");
+    if (!roomId) {
+      console.log("[WS] No roomId yet, not connecting");
+      return;
+    }
+
+    console.log(
+      `Creating WebSocket connection ws://localhost:8080/?room=${roomId}`
+    );
+
+    // Reset local state for new room
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPlayerIndex(null);
+    setPlayersConnected(0);
+    setGameStarted(false);
+    setTurn(null);
+    setHand([]);
+    setGroups([[], [], [], []]);
+    setDeckCount(0);
+    setDiscardPile([]);
+    setSpecialJoker(null);
+    setGameMessage(null);
+    setServerHandLength(0);
+    setLastDrawnCardId(null);
+    prevHandRef.current = [];
+    pendingHandsRef.current = null;
+
+    const ws = new WebSocket(
+      `ws://localhost:8080/?room=${encodeURIComponent(roomId)}`
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log("[WS] Connected");
+      console.log("[WS] Connected to room", roomId);
       setIsConnected(true);
 
+      // Optional: you *can* still send a join message; server may ignore it
       ws.send(
         JSON.stringify({
           type: "join_room",
-          room: "table-1",
+          room: roomId,
           playerId: null,
         })
       );
@@ -111,9 +149,9 @@ export default function useWebSocket() {
         }
 
         case "player_left": {
-          setGameMessage(`Player ${msg.slot + 1} left. Game reset.`);
-
+          setGameMessage("Opponent left the game.");
           setGameStarted(false);
+          setOpponentLeft(true);
           setHand([]);
           setGroups([[], [], [], []]);
           setDeckCount(0);
@@ -122,6 +160,7 @@ export default function useWebSocket() {
           setSpecialJoker(null);
           setServerHandLength(0);
           setLastDrawnCardId(null);
+
           prevHandRef.current = [];
           break;
         }
@@ -135,7 +174,7 @@ export default function useWebSocket() {
           setDiscardPile(msg.discardPile || []);
           setTurn(typeof msg.turn === "number" ? msg.turn : 0);
 
-          // 🔥 NEW: store full hands temporarily until playerIndex is known
+          // Store full hands until we know our exact index
           pendingHandsRef.current = msg.hands;
 
           const myIndex = playerIndexRef.current;
@@ -159,6 +198,12 @@ export default function useWebSocket() {
 
           break;
         }
+
+        case "left_confirmed":
+          console.log("Left room confirmed by server");
+          ws.close();
+          window.location.href = "/";
+          break;
 
         case "update": {
           const myIndex = playerIndexRef.current;
@@ -197,11 +242,19 @@ export default function useWebSocket() {
               setGroups(msg.groups[myIndex]);
             }
           }
+          // 🔥 UI notification AFTER state updates
+          if (msg.reshuffled) {
+            setTimeout(() => {
+              setGameMessage("Draw pile empty — reshuffling discard pile…");
+              setTimeout(() => setGameMessage(null), 3000);
+            }, 10);
+          }
 
           break;
         }
 
         case "win": {
+          setGameFinished(true);
           setGameMessage(`Player ${msg.winner + 1} wins!`);
           setGameStarted(false);
           setTurn(null);
@@ -211,7 +264,8 @@ export default function useWebSocket() {
 
         case "invalid_declare": {
           setGameMessage(
-            "Invalid declaration! 1 Pure + 1 Sequence required. Turn passed."
+            msg.reason ||
+              "Invalid declaration! 1 Pure + 1 Sequence required. Turn passed."
           );
           break;
         }
@@ -235,7 +289,8 @@ export default function useWebSocket() {
       console.warn("[WS] Disconnected");
       setIsConnected(false);
 
-      if (gameStartedRef.current) {
+      // Only show disconnect error if game didn't finish
+      if (!gameFinishedRef.current) {
         setGameMessage("Connection lost. Please refresh.");
       }
     };
@@ -246,8 +301,10 @@ export default function useWebSocket() {
       } catch (e) {
         console.error(e);
       }
+      wsRef.current = null;
+      setIsConnected(false);
     };
-  }, []);
+  }, [roomId]);
 
   return {
     // Connection
@@ -269,7 +326,7 @@ export default function useWebSocket() {
     gameMessage,
     serverHandLength,
     lastDrawnCardId,
-
+    opponentLeft,
     // Local mutators used by App DnD logic
     setHand,
     setGroups,

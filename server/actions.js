@@ -1,81 +1,137 @@
-// actions.js
+// actions.js (multi-room version)
 const state = require("./gameState");
+const { shuffle } = require("./deck");
 
-// ---------- DRAW ----------
-function draw(pi) {
-  if (state.turn !== pi) return;
-  if (state.hands[pi].length !== 13) return;
-  if (!state.deck.length) return;
-
-  const card = state.deck.pop();
-  state.hands[pi].push(card);
+// ---------------------------
+// ROOM HELPER
+// ---------------------------
+function getRoom(roomId) {
+  if (!state.rooms[roomId]) {
+    state.rooms[roomId] = {
+      players: [],
+      hands: [[], []],
+      groups: [
+        [[], [], [], []],
+        [[], [], [], []],
+      ],
+      deck: [],
+      discardPile: [],
+      turn: 0,
+      specialJoker: null,
+      lastActionMessage: null,
+      state: "waiting",
+    };
+  }
+  return state.rooms[roomId];
 }
 
-// ---------- PICK DISCARD ----------
-function pickDiscard(pi) {
-  if (state.turn !== pi) return;
-  if (state.hands[pi].length !== 13) return;
-  if (!state.discardPile.length) return;
+// ---------------------------------------------------------
+// DRAW LOGIC (FULLY FIXED FOR RESHUFFLE)
+// ---------------------------------------------------------
+function draw(roomId, pi) {
+  const R = getRoom(roomId);
+  if (!R || R.turn !== pi) return;
+  if (R.hands[pi].length !== 13) return;
 
-  const card = state.discardPile.shift();
-  state.hands[pi].push(card);
+  // CASE 1 → Deck already empty → reshuffle immediately
+  if (R.deck.length === 0) {
+    if (R.discardPile.length > 1) {
+      const top = R.discardPile[0];
+      const rest = R.discardPile.slice(1);
+      R.deck = shuffle([...rest]);
+      R.discardPile = [top];
+      R.lastActionMessage = "reshuffled";
+    }
+    return;
+  }
+
+  // CASE 2 → Deck has EXACTLY 1 card left (after drawing it becomes empty)
+  if (R.deck.length === 1) {
+    const lastCard = R.deck.pop();
+    R.hands[pi].push(lastCard);
+
+    // Now deck becomes empty → reshuffle discard pile (except top)
+    if (R.discardPile.length > 1) {
+      const top = R.discardPile[0];
+      const rest = R.discardPile.slice(1);
+      R.deck = shuffle([...rest]);
+      R.discardPile = [top];
+      R.lastActionMessage = "reshuffled";
+    }
+    return;
+  }
+
+  // CASE 3 → Normal draw
+  const card = R.deck.pop();
+  R.hands[pi].push(card);
 }
 
-// ---------- DISCARD ----------
-function discard(pi, cardId) {
-  if (state.turn !== pi) return;
-  if (state.hands[pi].length !== 14) return;
+// ---------------------------------------------------------
+// PICK DISCARD
+// ---------------------------------------------------------
+function pickDiscard(roomId, pi) {
+  const R = getRoom(roomId);
 
-  const idx = state.hands[pi].findIndex((c) => c.id === cardId);
+  if (R.turn !== pi) return;
+  if (R.hands[pi].length !== 13) return;
+  if (!R.discardPile.length) return;
+
+  const card = R.discardPile.shift();
+  R.hands[pi].push(card);
+}
+
+// ---------------------------------------------------------
+// DISCARD
+// ---------------------------------------------------------
+function discard(roomId, pi, cardId) {
+  const R = getRoom(roomId);
+
+  if (R.turn !== pi) return;
+  if (R.hands[pi].length !== 14) return;
+
+  const idx = R.hands[pi].findIndex((c) => c.id === cardId);
   if (idx === -1) return;
 
-  const [card] = state.hands[pi].splice(idx, 1);
-  state.discardPile.unshift(card);
+  const [card] = R.hands[pi].splice(idx, 1);
+  R.discardPile.unshift(card);
 
-  state.turn = state.turn === 0 ? 1 : 0;
+  R.turn = R.turn === 0 ? 1 : 0;
 }
 
-// ---------- UPDATE GROUPS (HAND ↔ GROUP OWNERSHIP FIX) ----------
-function updateGroups(pi, groups) {
-  if (!Array.isArray(groups)) return;
+// ---------------------------------------------------------
+// UPDATE GROUPS
+// ---------------------------------------------------------
+function updateGroups(roomId, pi, groups) {
+  const R = getRoom(roomId);
 
-  // Normalize groups to exactly 4 arrays
   const normalized = Array.from({ length: 4 }, (_, i) =>
     Array.isArray(groups[i]) ? [...groups[i]] : []
   );
 
-  // All card ids that are now in groups
   const groupedIds = new Set(normalized.flat().map((c) => c.id));
 
-  // Remove those from hand
-  if (groupedIds.size > 0) {
-    state.hands[pi] = state.hands[pi].filter((c) => !groupedIds.has(c.id));
-  }
-
-  // Save groups
-  state.groups[pi] = normalized;
+  R.hands[pi] = R.hands[pi].filter((c) => !groupedIds.has(c.id));
+  R.groups[pi] = normalized;
 }
 
-// ---------- MOVE GROUP → HAND (CLICK ON CARD IN GROUP) ----------
-function moveGroupToHand(pi, cardId, fromGroupIndex, newHandOrder) {
+// ---------------------------------------------------------
+// MOVE GROUP → HAND
+// ---------------------------------------------------------
+function moveGroupToHand(roomId, pi, cardId, fromGroupIndex, newHandOrder) {
+  const R = getRoom(roomId);
   let card = null;
 
-  // 1) Remove from specified group if present
-  if (typeof fromGroupIndex === "number" && state.groups[pi][fromGroupIndex]) {
-    const group = state.groups[pi][fromGroupIndex];
-    const idx = group.findIndex((c) => c.id === cardId);
-    if (idx !== -1) {
-      [card] = group.splice(idx, 1);
-    }
+  if (typeof fromGroupIndex === "number") {
+    const g = R.groups[pi][fromGroupIndex];
+    const i = g.findIndex((c) => c.id === cardId);
+    if (i !== -1) [card] = g.splice(i, 1);
   }
 
-  // 2) Fallback: remove from any group
   if (!card) {
-    for (let gi = 0; gi < state.groups[pi].length; gi++) {
-      const g = state.groups[pi][gi];
-      const idx = g.findIndex((c) => c.id === cardId);
-      if (idx !== -1) {
-        [card] = g.splice(idx, 1);
+    for (const g of R.groups[pi]) {
+      const i = g.findIndex((c) => c.id === cardId);
+      if (i !== -1) {
+        [card] = g.splice(i, 1);
         break;
       }
     }
@@ -83,37 +139,55 @@ function moveGroupToHand(pi, cardId, fromGroupIndex, newHandOrder) {
 
   if (!card) return;
 
-  // 3) Ensure card is not in hand already
-  state.hands[pi] = state.hands[pi].filter((c) => c.id !== cardId);
+  R.hands[pi] = R.hands[pi].filter((c) => c.id !== cardId);
 
-  // 4) Build new hand from order + existing cards
   const map = new Map();
   map.set(card.id, card);
-  for (const c of state.hands[pi]) map.set(c.id, c);
+  for (const c of R.hands[pi]) map.set(c.id, c);
 
   const newHand = [];
-  if (Array.isArray(newHandOrder) && newHandOrder.length) {
+
+  if (Array.isArray(newHandOrder)) {
     for (const id of newHandOrder) {
-      const found = map.get(id);
-      if (found) {
-        newHand.push(found);
+      const f = map.get(id);
+      if (f) {
+        newHand.push(f);
         map.delete(id);
       }
     }
   }
 
-  // Append any leftovers (defensive; should usually be none)
-  for (const c of map.values()) {
-    if (!newHand.some((x) => x.id === c.id)) newHand.push(c);
-  }
+  for (const c of map.values()) newHand.push(c);
 
-  state.hands[pi] = newHand;
+  R.hands[pi] = newHand;
+}
+
+// ---------------------------------------------------------
+// RESET ROOM
+// ---------------------------------------------------------
+function resetRoom(roomId) {
+  state.rooms[roomId] = {
+    players: [],
+    hands: [[], []],
+    groups: [
+      [[], [], [], []],
+      [[], [], [], []],
+    ],
+    deck: [],
+    discardPile: [],
+    turn: 0,
+    specialJoker: null,
+    lastActionMessage: null,
+    state: "waiting",
+  };
 }
 
 module.exports = {
+  getRoom,
   draw,
   pickDiscard,
   discard,
   updateGroups,
   moveGroupToHand,
+  resetRoom,
 };

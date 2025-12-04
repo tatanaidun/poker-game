@@ -37,10 +37,8 @@ export default function DiscardPile({
 
       {specialJoker && (
         <div className={styles.specialBox}>
-          <span className={styles.specialLabel}>Special Joker:</span>
-          <span className={styles.specialCard}>
-            {specialJoker.rank} {specialJoker.suit}
-          </span>
+          <span className={styles.specialLabel}>Special Joker: </span>
+          <span className={styles.specialCard}>{specialJoker.rank}</span>
         </div>
       )}
     </div>
