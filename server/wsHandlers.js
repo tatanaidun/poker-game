@@ -183,6 +183,28 @@ function onConnection(ws, roomId) {
         break;
       }
 
+      case "rematch_request": {
+        const Rm = getRoom(roomId);
+
+        // Mark request from this player
+        Rm.rematch = Rm.rematch || [false, false];
+        Rm.rematch[pi] = true;
+
+        // If both clicked rematch → start new game
+        if (Rm.rematch[0] && Rm.rematch[1]) {
+          Rm.rematch = [false, false];
+          startGame(roomId);
+        }
+
+        // Tell FE that this player requested rematch
+        broadcast(roomId, {
+          type: "rematch_pending",
+          requested: pi,
+        });
+
+        break;
+      }
+
       case "declare": {
         const Rm = getRoom(roomId);
 

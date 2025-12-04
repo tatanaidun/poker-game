@@ -44,6 +44,10 @@ export default function App() {
     serverHandLength,
     lastDrawnCardId,
     opponentLeft,
+    gameOver,
+    winner,
+    opponentRematch,
+    requestRematch,
     setHand,
     setGroups,
     sendMessage,
@@ -381,6 +385,30 @@ export default function App() {
               playerIndex={playerIndex}
               gameMessage={gameMessage}
             />
+
+            {gameOver && (
+              <div className="rematch-box">
+                <h2>Player {winner + 1} wins!</h2>
+
+                <button className="green-btn" onClick={requestRematch}>
+                  Play Again
+                </button>
+
+                <button
+                  className="red-btn"
+                  onClick={() => {
+                    sendMessage({ type: "leave" });
+                    window.location.href = "/";
+                  }}
+                >
+                  Leave Room
+                </button>
+
+                {opponentRematch !== null && (
+                  <p>Player {opponentRematch + 1} wants a rematch…</p>
+                )}
+              </div>
+            )}
             <OpponentStatus playerIndex={playerIndex} turn={turn} />
 
             <section className={styles.topRow}>

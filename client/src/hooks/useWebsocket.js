@@ -10,9 +10,14 @@ export default function useWebSocket(roomId) {
   const playersConnectedRef = useRef(0);
   const prevHandRef = useRef([]); // for detecting newly drawn card
   const pendingHandsRef = useRef(null); // hands received before playerIndex is known
-  const [opponentLeft, setOpponentLeft] = useState(false);
 
   // Public state
+  const [opponentLeft, setOpponentLeft] = useState(false);
+
+  const [gameOver, setGameOver] = useState(false);
+  const [winner, setWinner] = useState(null);
+  const [opponentRematch, setOpponentRematch] = useState(null);
+
   const [serverHandLength, setServerHandLength] = useState(0);
   const [lastDrawnCardId, setLastDrawnCardId] = useState(null);
 
@@ -59,6 +64,10 @@ export default function useWebSocket(roomId) {
     }
     console.log("[WS SEND]", data);
     ws.send(JSON.stringify(data));
+  };
+
+  const requestRematch = () => {
+    wsRef.current?.send(JSON.stringify({ type: "rematch_request" }));
   };
 
   // If we got full hands *before* playerIndex was known, apply them once we know it
@@ -195,6 +204,10 @@ export default function useWebSocket(roomId) {
           // reset groups
           setGroups([[], [], [], []]);
           setLastDrawnCardId(null);
+          // reset flags
+          setGameOver(false);
+          setWinner(null);
+          setOpponentRematch(null);
 
           break;
         }
@@ -258,7 +271,15 @@ export default function useWebSocket(roomId) {
           setGameMessage(`Player ${msg.winner + 1} wins!`);
           setGameStarted(false);
           setTurn(null);
+          setWinner(msg.winner);
+          setGameOver(true);
+
           setLastDrawnCardId(null);
+          break;
+        }
+
+        case "rematch_pending": {
+          setOpponentRematch(msg.requested);
           break;
         }
 
@@ -327,6 +348,11 @@ export default function useWebSocket(roomId) {
     serverHandLength,
     lastDrawnCardId,
     opponentLeft,
+
+    gameOver,
+    winner,
+    opponentRematch,
+    requestRematch,
     // Local mutators used by App DnD logic
     setHand,
     setGroups,
