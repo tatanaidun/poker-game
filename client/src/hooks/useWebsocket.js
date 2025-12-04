@@ -9,7 +9,7 @@ export default function useWebSocket() {
   const gameStartedRef = useRef(false);
   const playersConnectedRef = useRef(0);
   const prevHandRef = useRef([]); // for detecting newly drawn card
-
+  const pendingHandsRef = useRef(null);
   // Public state
   const [serverHandLength, setServerHandLength] = useState(0);
   const [lastDrawnCardId, setLastDrawnCardId] = useState(null);
@@ -52,6 +52,17 @@ export default function useWebSocket() {
     console.log("sending this data", data);
     ws.send(JSON.stringify(data));
   };
+
+  useEffect(() => {
+    if (playerIndex !== null && pendingHandsRef.current) {
+      const full = pendingHandsRef.current;
+      if (full[playerIndex]) {
+        setHand(full[playerIndex]);
+        setServerHandLength(full[playerIndex].length);
+      }
+      pendingHandsRef.current = null; // consume
+    }
+  }, [playerIndex]);
 
   // Initialize WebSocket ONCE
   useEffect(() => {
@@ -124,20 +135,28 @@ export default function useWebSocket() {
           setDiscardPile(msg.discardPile || []);
           setTurn(typeof msg.turn === "number" ? msg.turn : 0);
 
+          // 🔥 NEW: store full hands temporarily until playerIndex is known
+          pendingHandsRef.current = msg.hands;
+
           const myIndex = playerIndexRef.current;
-          if (msg.hands && typeof myIndex === "number") {
+
+          if (typeof myIndex === "number") {
+            // If playerIndex is already known → apply immediately
             const myHand = msg.hands[myIndex] || [];
             setHand(myHand);
             setServerHandLength(myHand.length);
             prevHandRef.current = myHand;
           } else {
+            // Player index not known yet → wait for the effect to populate it
             setHand([]);
             setServerHandLength(0);
             prevHandRef.current = [];
           }
 
+          // reset groups
           setGroups([[], [], [], []]);
           setLastDrawnCardId(null);
+
           break;
         }
 

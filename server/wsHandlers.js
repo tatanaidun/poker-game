@@ -42,11 +42,14 @@ function startGame() {
   // --- Choose Special Joker (must REMOVE from deck!) ---
   const mid = Math.floor(deck.length / 2);
   const special = deck[mid];
-  state.specialJoker = special;
 
   // Remove special joker from deck completely
   deck.splice(mid, 1);
 
+  if (special.rank === "JOKER") {
+    special = { id: uuidv4(), suit: null, rank: "A" };
+  }
+  state.specialJoker = special;
   // --- First open discard ---
   const firstOpen = deck.pop();
   state.discardPile = [firstOpen];
