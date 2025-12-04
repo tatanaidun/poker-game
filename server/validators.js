@@ -14,111 +14,143 @@ const RANK_ORDER = [
   "K",
 ];
 
-function rankIndex(rank) {
-  return RANK_ORDER.indexOf(rank);
+// ----- Joker Helpers -----
+function isPrintedJoker(card) {
+  return card.rank === "JOKER";
 }
 
-function isJokerCard(card, special) {
-  // Printed joker
-  if (card.rank === "JOKER") return true;
+function isWildJoker(card, special) {
+  if (!special) return false;
 
-  // Printed joker chosen → all Aces are jokers
+  // Printed joker selected → all A's become wild
   if (special.rank === "A" && special.suit === "ALL") {
     return card.rank === "A";
   }
 
-  // Otherwise → all cards with same rank as special become jokers
+  // Otherwise any card of same rank becomes wild
   return card.rank === special.rank;
 }
 
-function checkGroupValidity(group, special) {
-  if (group.length < 3) return { valid: false };
+// ----- SEQUENCE CHECK -----
+function checkSequence(group, special, treatWildAsJoker) {
+  const printed = group.filter(isPrintedJoker);
+  const wild = group.filter((c) => isWildJoker(c, special));
 
-  const jokers = group.filter((c) => isJokerCard(c, special));
-  const actual = group.filter((c) => !isJokerCard(c, special));
+  const jokerCount = printed.length + (treatWildAsJoker ? wild.length : 0);
 
-  // ------------------------------
-  // 1) CHECK SET
-  // ------------------------------
-  if (actual.length > 0 && actual.every((c) => c.rank === actual[0].rank)) {
-    const suits = new Set(actual.map((c) => c.suit));
-    if (suits.size === actual.length && group.length <= 4) {
-      return { valid: true, type: "set" };
-    }
-  }
+  // “Actual” cards that must follow sequence rules
+  const actual = group.filter((c) => {
+    if (isPrintedJoker(c)) return false;
+    if (treatWildAsJoker && isWildJoker(c, special)) return false;
+    return true;
+  });
 
-  // ------------------------------
-  // 2) CHECK SEQUENCE
-  // ------------------------------
+  if (actual.length === 0) return { valid: false, type: null };
 
-  // Actual cards must all be same suit
-  const suitSet = new Set(actual.map((c) => c.suit));
-  if (actual.length > 0 && suitSet.size !== 1) {
-    return { valid: false };
-  }
+  // Suit check
+  const suits = actual.map((c) => c.suit);
+  if (new Set(suits).size !== 1) return { valid: false, type: null };
 
-  const suit = actual.length > 0 ? actual[0].suit : null;
+  // Rank ordering (with Q-K-A)
+  const base = actual.map((c) => RANK_ORDER.indexOf(c.rank));
+  const hasA = base.includes(0);
+  const hasQ = base.includes(11);
+  const hasK = base.includes(12);
 
-  // Sort actual ranks numerically
-  const actualRanks = actual.map((c) => rankIndex(c.rank));
-  actualRanks.sort((a, b) => a - b);
+  const ranks = base
+    .map((i) => (i === 0 && hasQ && hasK ? 13 : i))
+    .sort((a, b) => a - b);
 
-  // Special handling for Q-K-A
-  const containsA = actual.some((c) => c.rank === "A");
-  const containsK = actual.some((c) => c.rank === "K");
-  const containsQ = actual.some((c) => c.rank === "Q");
-
-  let ranks = [...actualRanks];
-
-  if (containsA && containsK && containsQ) {
-    // Treat Ace as 14 in Q-K-A sequence
-    ranks = ranks.map((i) => (i === 0 ? 13 : i));
-    ranks.sort((a, b) => a - b);
-  }
-
-  // Count gaps
-  let neededJokers = 0;
+  // Count missing cards in sequence
+  let needed = 0;
   for (let i = 0; i < ranks.length - 1; i++) {
-    const diff = ranks[i + 1] - ranks[i];
-    if (diff === 1) continue;
-    if (diff > 1) neededJokers += diff - 1;
-    else return { valid: false };
+    const d = ranks[i + 1] - ranks[i];
+    if (d === 0) return { valid: false, type: null }; // duplicate rank
+    if (d > 1) needed += d - 1;
   }
 
-  if (neededJokers <= jokers.length) {
-    return {
-      valid: true,
-      type: jokers.length === 0 ? "pure" : "impure",
-    };
-  }
+  if (needed > jokerCount) return { valid: false, type: null };
 
-  return { valid: false };
+  const usesJoker = needed > 0;
+  return { valid: true, type: usesJoker ? "impure" : "pure" };
 }
 
-function isValidRummyDeclaration(groups, special) {
-  let total = 0;
+// ----- SET CHECK -----
+function checkSet(group, special) {
+  const natural = group.filter(
+    (c) => !isPrintedJoker(c) && !isWildJoker(c, special)
+  );
+
+  const jokers = group.length - natural.length;
+
+  // Must have at least 1 natural card
+  if (natural.length === 0) return { valid: false, type: null };
+
+  // Natural cards must be same rank
+  const rank = natural[0].rank;
+  if (!natural.every((c) => c.rank === rank))
+    return { valid: false, type: null };
+
+  // Natural suits must be unique (max 4 natural)
+  const suits = new Set(natural.map((c) => c.suit));
+  if (suits.size !== natural.length) return { valid: false, type: null };
+  if (natural.length > 4) return { valid: false, type: null }; // suit rule
+
+  // Jokers can be unlimited — allowed
+  const jokerUsed = jokers > 0;
+
+  return {
+    valid: true,
+    type: jokerUsed ? "impure" : "pure",
+  };
+}
+
+// ----- MAIN GROUP VALIDATOR -----
+function checkGroupValidity(group, special) {
+  if (group.length < 3) return { valid: false, type: null };
+
+  // 1. Try sequence treating wild as NORMAL cards
+  const seq1 = checkSequence(group, special, false);
+  if (seq1.valid) return seq1;
+
+  // 2. Try sequence treating wild as JOKERS
+  const seq2 = checkSequence(group, special, true);
+  if (seq2.valid) return seq2;
+
+  // 3. Try set
+  const set = checkSet(group, special);
+  if (set.valid) return set;
+
+  return { valid: false, type: null };
+}
+
+// ----- DECLARATION VALIDATOR -----
+function isValidRummyDeclaration(groups, joker) {
   let hasPure = false;
-  let hasSecondSeq = false;
+  let hasSecond = false;
+  let total = 0;
 
   for (const g of groups) {
     if (g.length === 0) continue;
 
     total += g.length;
+    const { valid, type } = checkGroupValidity(g, joker);
+    if (!valid) return false;
 
-    const res = checkGroupValidity(g, special);
-    if (!res.valid) return false;
-
-    if (res.type === "pure") {
+    if (type === "pure") {
       if (!hasPure) hasPure = true;
-      else if (!hasSecondSeq) hasSecondSeq = true;
+      else if (!hasSecond) hasSecond = true;
     }
 
-    if (res.type === "impure" && hasPure && !hasSecondSeq) {
-      hasSecondSeq = true;
+    if (type === "impure") {
+      if (hasPure && !hasSecond) hasSecond = true;
     }
   }
 
-  return total === 13 && hasPure && hasSecondSeq;
+  return total === 13 && hasPure && hasSecond;
 }
 
-module.exports = { checkGroupValidity, isValidRummyDeclaration };
+module.exports = {
+  checkGroupValidity,
+  isValidRummyDeclaration,
+};
