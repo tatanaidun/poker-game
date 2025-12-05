@@ -165,9 +165,15 @@ function moveGroupToHand(roomId, pi, cardId, fromGroupIndex, newHandOrder) {
 // ---------------------------------------------------------
 // RESET ROOM
 // ---------------------------------------------------------
+
 function resetRoom(roomId) {
+  const R = getRoom(roomId);
+
+  // Keep players in the room
+  const players = R.players;
+
   state.rooms[roomId] = {
-    players: [],
+    players,
     hands: [[], []],
     groups: [
       [[], [], [], []],
@@ -179,6 +185,7 @@ function resetRoom(roomId) {
     specialJoker: null,
     lastActionMessage: null,
     state: "waiting",
+    rematch: [false, false],
   };
 }
 

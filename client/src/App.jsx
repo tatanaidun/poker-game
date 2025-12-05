@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 // src/App.jsx
 import React, { useEffect, useState } from "react";
 import { DndProvider } from "react-dnd";
@@ -44,10 +45,12 @@ export default function App() {
     serverHandLength,
     lastDrawnCardId,
     opponentLeft,
+
     gameOver,
     winner,
-    opponentRematch,
-    requestRematch,
+    rematchRequestedByOpponent,
+    rematchRejected,
+
     setHand,
     setGroups,
     sendMessage,
@@ -57,6 +60,10 @@ export default function App() {
   const [cardPicked, setCardPicked] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [showAnimatedMsg, setShowAnimatedMsg] = useState(false);
+
+  // NEW: track if *I* have sent rematch request (to disable button)
+  const [myRematchRequested, setMyRematchRequested] = useState(false);
+
   const groupedCount = groups.flat().length;
   const isMyTurn = playerIndex !== null && turn === playerIndex;
 
@@ -91,13 +98,19 @@ export default function App() {
     groupedCount === 13 &&
     serverHandLength === 1;
 
+  // reset "card picked" at start of each MY turn
   useEffect(() => {
     if (turn === playerIndex) {
-      // reset "card picked" at start of each of MY turns
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCardPicked(false);
     }
   }, [turn, playerIndex]);
+
+  // Reset my rematch request when a new game starts or gameOver becomes false
+  useEffect(() => {
+    if (!gameOver) {
+      setMyRematchRequested(false);
+    }
+  }, [gameOver]);
 
   // ─────────────────────────────────────────────
   // LOBBY: CREATE / JOIN ROOM
@@ -130,6 +143,23 @@ export default function App() {
         ? prev.filter((id) => id !== cardId)
         : [...prev, cardId]
     );
+  };
+
+  const handleReturnEntireGroup = (groupIndex) => {
+    const cards = groups[groupIndex];
+    if (!cards.length) return;
+
+    const newGroups = groups.map((g, i) => (i === groupIndex ? [] : g));
+    const newHand = [...hand, ...cards];
+
+    setGroups(newGroups);
+    setHand(newHand);
+
+    sendMessage({
+      type: "move_group_to_hand_bulk",
+      groupIndex,
+      toHandOrder: newHand.map((c) => c.id),
+    });
   };
 
   const handleDiscardSelected = () => {
@@ -256,7 +286,9 @@ export default function App() {
     });
   };
 
-  // When gameMessage changes → fade in, auto fade out
+  // ─────────────────────────────────────────────
+  // Animated game message
+  // ─────────────────────────────────────────────
   useEffect(() => {
     if (!gameMessage) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -264,10 +296,8 @@ export default function App() {
       return;
     }
 
-    // Fade in
     setShowAnimatedMsg(true);
 
-    // Auto fade out after 3 seconds
     const t = setTimeout(() => {
       setShowAnimatedMsg(false);
     }, 3000);
@@ -336,13 +366,16 @@ export default function App() {
             {gameMessage}
           </div>
         )}
+
         <Header playersConnected={playersConnected} />
+
         <button
           className={styles.leaveButton}
           onClick={() => setShowLeaveConfirm(true)}
         >
           Leave Game
         </button>
+
         <button
           onClick={() => {
             const url = window.location.href;
@@ -370,7 +403,7 @@ export default function App() {
           </div>
         )}
 
-        {!gameStarted && isConnected && (
+        {!gameStarted && isConnected && !gameOver && (
           <div className={styles.waitingBox}>
             <h2>Waiting for Game to Start…</h2>
             <p>Players Connected: {playersConnected} / 2</p>
@@ -386,29 +419,6 @@ export default function App() {
               gameMessage={gameMessage}
             />
 
-            {gameOver && (
-              <div className="rematch-box">
-                <h2>Player {winner + 1} wins!</h2>
-
-                <button className="green-btn" onClick={requestRematch}>
-                  Play Again
-                </button>
-
-                <button
-                  className="red-btn"
-                  onClick={() => {
-                    sendMessage({ type: "leave" });
-                    window.location.href = "/";
-                  }}
-                >
-                  Leave Room
-                </button>
-
-                {opponentRematch !== null && (
-                  <p>Player {opponentRematch + 1} wants a rematch…</p>
-                )}
-              </div>
-            )}
             <OpponentStatus playerIndex={playerIndex} turn={turn} />
 
             <section className={styles.topRow}>
@@ -470,6 +480,7 @@ export default function App() {
               groups={groups}
               onDropCardsFromHand={handleMoveCardsFromHandToGroup}
               onReturnCardToHand={handleReturnCardToHand}
+              onReturnEntireGroup={handleReturnEntireGroup}
             />
 
             <Hand
@@ -483,7 +494,81 @@ export default function App() {
             />
           </main>
         )}
+
+        {/* 🔥 Rematch UI — always rendered outside main */}
+        {gameOver && (
+          <div className="rematch-box">
+            <h2>Player {winner + 1} wins!</h2>
+
+            {/* You request rematch */}
+            <button
+              className="green-btn"
+              onClick={() => {
+                if (myRematchRequested) return;
+                sendMessage({ type: "rematch_request" });
+                console.log("sending rematch req");
+                setMyRematchRequested(true);
+              }}
+              disabled={myRematchRequested}
+            >
+              {myRematchRequested ? "Rematch Requested…" : "Play Again"}
+            </button>
+
+            {/* Leave Room explicitly after game */}
+            <button
+              className="red-btn"
+              onClick={() => {
+                sendMessage({ type: "leave" });
+                window.location.href = "/";
+              }}
+            >
+              Leave Room
+            </button>
+
+            {/* When opponent has requested rematch */}
+            {rematchRequestedByOpponent !== null &&
+              rematchRequestedByOpponent !== playerIndex && (
+                <div className="rematch-actions">
+                  <p>
+                    Player {rematchRequestedByOpponent + 1} wants a rematch. Do
+                    you accept?
+                  </p>
+
+                  <button
+                    className="green-btn"
+                    onClick={() => {
+                      // explicit accept → server should start new game
+                      sendMessage({ type: "rematch_accept" });
+                    }}
+                  >
+                    Accept
+                  </button>
+
+                  <button
+                    className="red-btn"
+                    onClick={() => {
+                      // Reject + leave room (Option B behavior)
+                      sendMessage({ type: "rematch_reject" });
+                      sendMessage({ type: "leave" });
+                      window.location.href = "/";
+                    }}
+                  >
+                    Reject
+                  </button>
+                </div>
+              )}
+
+            {/* Optional: text when server told you rematch was rejected */}
+            {rematchRejected && (
+              <p className="info-message">
+                Opponent rejected the rematch and left the room.
+              </p>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Leave-confirm for in-game leave button */}
       {showLeaveConfirm && (
         <div className={styles.modalBackdrop}>
           <div className={styles.modalBox}>
@@ -493,7 +578,7 @@ export default function App() {
             <button
               className={styles.confirmButton}
               onClick={() => {
-                sendMessage({ type: "leave" }); // send only once
+                sendMessage({ type: "leave" });
                 window.location.href = "/";
               }}
             >
@@ -509,6 +594,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Opponent-left modal (used for rematch reject path too) */}
       {opponentLeft && (
         <div className={styles.modalBackdrop}>
           <div className={styles.modalBox}>

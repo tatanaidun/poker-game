@@ -1,3 +1,5 @@
+// validators.js
+
 const RANK_ORDER = [
   "A",
   "2",
@@ -29,6 +31,22 @@ function isWildJoker(card, special) {
 
   // Otherwise any card of same rank becomes wild
   return card.rank === special.rank;
+}
+
+// ----- NEW: GROUP NORMALIZER -----
+// Sorts cards by rank so that things like 2,4,3 become 2,3,4.
+// Printed JOKERs are pushed to the end so they don't break ordering.
+function normalizeGroup(group) {
+  return [...group].sort((a, b) => {
+    const rankIndex = (card) => {
+      if (card.rank === "JOKER") return 99; // jokers last
+      return RANK_ORDER.indexOf(card.rank);
+    };
+
+    const ra = rankIndex(a);
+    const rb = rankIndex(b);
+    return ra - rb;
+  });
 }
 
 // ----- SEQUENCE CHECK -----
@@ -109,16 +127,19 @@ function checkSet(group, special) {
 function checkGroupValidity(group, special) {
   if (group.length < 3) return { valid: false, type: null };
 
+  // ✅ Normalize group so 2,4,3 / Q,10,A etc. are in rank order
+  const normalized = normalizeGroup(group);
+
   // 1. Try sequence treating wild as NORMAL cards
-  const seq1 = checkSequence(group, special, false);
+  const seq1 = checkSequence(normalized, special, false);
   if (seq1.valid) return seq1;
 
   // 2. Try sequence treating wild as JOKERS
-  const seq2 = checkSequence(group, special, true);
+  const seq2 = checkSequence(normalized, special, true);
   if (seq2.valid) return seq2;
 
   // 3. Try set
-  const set = checkSet(group, special);
+  const set = checkSet(normalized, special);
   if (set.valid) return set;
 
   return { valid: false, type: null };

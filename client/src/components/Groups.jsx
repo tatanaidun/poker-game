@@ -10,6 +10,7 @@ function GroupBucket({
   groupIndex,
   onDropCardsFromHand,
   onReturnCardToHand,
+  onReturnEntireGroup, // NEW
 }) {
   const [{ isOver }, dropRef] = useDrop({
     accept: CARD_ITEM,
@@ -18,7 +19,7 @@ function GroupBucket({
 
       let ids = Array.isArray(item.ids) ? item.ids : [];
 
-      if (!ids.length && item.card && item.card.id) {
+      if (!ids.length && item.card?.id) {
         ids = [item.card.id];
       }
 
@@ -36,6 +37,17 @@ function GroupBucket({
       ref={dropRef}
       className={`${styles.group} ${isOver ? styles.groupHover : ""}`}
     >
+      {/* 🔥 NEW BUTTON (Return entire group to hand) */}
+      {cards.length > 0 && (
+        <button
+          className={styles.returnAllButton}
+          onClick={() => onReturnEntireGroup(groupIndex)}
+          title="Return all cards to hand"
+        >
+          ⟲
+        </button>
+      )}
+
       {cards.length === 0 && (
         <div className={styles.placeholder}>Drop cards here</div>
       )}
@@ -60,6 +72,7 @@ export default function Groups({
   groups,
   onDropCardsFromHand,
   onReturnCardToHand,
+  onReturnEntireGroup,
 }) {
   const bucketCount = 4;
   const buckets = Array.from(
@@ -78,6 +91,7 @@ export default function Groups({
             groupIndex={idx}
             onDropCardsFromHand={onDropCardsFromHand}
             onReturnCardToHand={onReturnCardToHand}
+            onReturnEntireGroup={onReturnEntireGroup} // NEW
           />
         ))}
       </div>

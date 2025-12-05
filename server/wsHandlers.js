@@ -170,37 +170,98 @@ function onConnection(ws, roomId) {
       }
 
       case "leave": {
-        console.log(`Player ${pi} left room ${roomId}`);
-        send(ws, { type: "left_confirmed" });
-        broadcast(roomId, { type: "player_left", slot: pi });
-        resetRoom(roomId);
+        const Rm = getRoom(roomId);
 
+        // Notify opponent FIRST
+        broadcast(roomId, {
+          type: "player_left",
+          slot: pi,
+        });
+
+        // Let this player confirm leaving
+        send(ws, { type: "left_confirmed" });
+
+        // Close only THIS socket
         try {
           ws.close();
-        } catch (e) {
-          console.log(e);
-        }
+        } catch {}
+
+        // Reset the whole room after 100ms delay
+        // so the opponent can still receive the message
+        setTimeout(() => resetRoom(roomId), 100);
+
         break;
       }
 
+      /*********************************
+       * REMATCH SYSTEM — EXPLICIT FLOW
+       *********************************/
+      /*********************************
+       * 🔥 REMATCH SYSTEM — EXPLICIT FLOW
+       *********************************/
       case "rematch_request": {
+        console.log("room id", roomId);
         const Rm = getRoom(roomId);
+        console.log(Rm);
+        console.log("In BE rematch request");
+        // Create tracking array if not exists
+        Rm.rematch = Rm.rematch || [false, false];
 
-        // Mark request from this player
+        // Mark this player's request
+        Rm.rematch[pi] = true;
+        console.log(pi, "pi");
+        // Notify opponent
+        broadcast(roomId, {
+          type: "rematch_pending",
+          requested: pi,
+        });
+
+        // If BOTH requested
+        if (Rm.rematch[0] && Rm.rematch[1]) {
+          Rm.rematch = [false, false]; // Reset
+          startGame(roomId); // NEW GAME STARTS
+        }
+
+        break;
+      }
+
+      case "rematch_accept": {
+        const Rm = getRoom(roomId);
+        console.log("inside rematch_accept");
+        // Mark acceptance
         Rm.rematch = Rm.rematch || [false, false];
         Rm.rematch[pi] = true;
 
-        // If both clicked rematch → start new game
+        // Notify opponent
+        broadcast(roomId, {
+          type: "rematch_accept",
+          from: pi,
+        });
+        console.log(Rm.rematch);
+        // If both accepted/rematch-requested
         if (Rm.rematch[0] && Rm.rematch[1]) {
           Rm.rematch = [false, false];
           startGame(roomId);
         }
 
-        // Tell FE that this player requested rematch
+        break;
+      }
+
+      case "rematch_reject": {
+        // Tell opponent
         broadcast(roomId, {
-          type: "rematch_pending",
-          requested: pi,
+          type: "rematch_reject",
+          from: pi,
         });
+
+        // Let THIS player leave normally
+        send(ws, { type: "left_confirmed" });
+        try {
+          ws.close();
+        } catch {}
+
+        // Opponent sees "player_left" inside App.jsx → modal shown
+        setTimeout(() => resetRoom(roomId), 100);
 
         break;
       }
@@ -212,7 +273,7 @@ function onConnection(ws, roomId) {
 
         if (!ok) {
           send(ws, { type: "invalid_declare" });
-          Rm.turn = Rm.turn === 0 ? 1 : 0;
+
           broadcastState(roomId);
           break;
         }

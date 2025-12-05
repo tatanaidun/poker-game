@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 // src/hooks/useWebsocket.js
 import { useEffect, useRef, useState } from "react";
 
@@ -11,12 +12,20 @@ export default function useWebSocket(roomId) {
   const prevHandRef = useRef([]); // for detecting newly drawn card
   const pendingHandsRef = useRef(null); // hands received before playerIndex is known
 
+  const gameFinishedRef = useRef(false);
+
   // Public state
   const [opponentLeft, setOpponentLeft] = useState(false);
 
   const [gameOver, setGameOver] = useState(false);
   const [winner, setWinner] = useState(null);
-  const [opponentRematch, setOpponentRematch] = useState(null);
+
+  // Rematch UI state
+  const [rematchRequestedByOpponent, setRematchRequestedByOpponent] =
+    useState(null);
+  // eslint-disable-next-line no-unused-vars
+  const [rematchAccepted, setRematchAccepted] = useState(false);
+  const [rematchRejected, setRematchRejected] = useState(false);
 
   const [serverHandLength, setServerHandLength] = useState(0);
   const [lastDrawnCardId, setLastDrawnCardId] = useState(null);
@@ -36,7 +45,6 @@ export default function useWebSocket(roomId) {
   const [gameMessage, setGameMessage] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const [gameFinished, setGameFinished] = useState(false);
-  const gameFinishedRef = useRef(false);
 
   useEffect(() => {
     gameFinishedRef.current = gameFinished;
@@ -66,10 +74,6 @@ export default function useWebSocket(roomId) {
     ws.send(JSON.stringify(data));
   };
 
-  const requestRematch = () => {
-    wsRef.current?.send(JSON.stringify({ type: "rematch_request" }));
-  };
-
   // If we got full hands *before* playerIndex was known, apply them once we know it
   useEffect(() => {
     if (playerIndex !== null && pendingHandsRef.current) {
@@ -95,7 +99,6 @@ export default function useWebSocket(roomId) {
     );
 
     // Reset local state for new room
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPlayerIndex(null);
     setPlayersConnected(0);
     setGameStarted(false);
@@ -108,6 +111,13 @@ export default function useWebSocket(roomId) {
     setGameMessage(null);
     setServerHandLength(0);
     setLastDrawnCardId(null);
+    setOpponentLeft(false);
+    setGameOver(false);
+    setWinner(null);
+    setRematchRequestedByOpponent(null);
+    setRematchRejected(false);
+    setRematchAccepted(false);
+
     prevHandRef.current = [];
     pendingHandsRef.current = null;
 
@@ -120,7 +130,7 @@ export default function useWebSocket(roomId) {
       console.log("[WS] Connected to room", roomId);
       setIsConnected(true);
 
-      // Optional: you *can* still send a join message; server may ignore it
+      // optional join payload (server may ignore)
       ws.send(
         JSON.stringify({
           type: "join_room",
@@ -169,7 +179,6 @@ export default function useWebSocket(roomId) {
           setSpecialJoker(null);
           setServerHandLength(0);
           setLastDrawnCardId(null);
-
           prevHandRef.current = [];
           break;
         }
@@ -189,39 +198,41 @@ export default function useWebSocket(roomId) {
           const myIndex = playerIndexRef.current;
 
           if (typeof myIndex === "number") {
-            // If playerIndex is already known → apply immediately
             const myHand = msg.hands[myIndex] || [];
             setHand(myHand);
             setServerHandLength(myHand.length);
             prevHandRef.current = myHand;
           } else {
-            // Player index not known yet → wait for the effect to populate it
             setHand([]);
             setServerHandLength(0);
             prevHandRef.current = [];
           }
 
-          // reset groups
           setGroups([[], [], [], []]);
           setLastDrawnCardId(null);
-          // reset flags
+
+          // reset flags related to previous game
           setGameOver(false);
           setWinner(null);
-          setOpponentRematch(null);
+          setRematchRequestedByOpponent(null);
+
+          setGameFinished(false);
+
+          setRematchAccepted(false);
+          setRematchRejected(false);
 
           break;
         }
 
-        case "left_confirmed":
+        case "left_confirmed": {
           console.log("Left room confirmed by server");
           ws.close();
-          window.location.href = "/";
           break;
+        }
 
         case "update": {
           const myIndex = playerIndexRef.current;
 
-          // Shared state
           setDeckCount(msg.deckCount || 0);
           setDiscardPile(msg.discardPile || []);
           setPlayersConnected(msg.players || playersConnectedRef.current);
@@ -231,12 +242,10 @@ export default function useWebSocket(roomId) {
           }
 
           if (typeof myIndex === "number") {
-            // HAND
             if (msg.hands?.[myIndex]) {
               const newHand = msg.hands[myIndex] || [];
               const prevHand = prevHandRef.current || [];
 
-              // Detect newly drawn card (for highlight)
               const prevIds = new Set(prevHand.map((c) => c.id));
               if (newHand.length > prevHand.length) {
                 const added = newHand.find((c) => !prevIds.has(c.id));
@@ -250,15 +259,17 @@ export default function useWebSocket(roomId) {
               prevHandRef.current = newHand;
             }
 
-            // GROUPS
             if (msg.groups?.[myIndex]) {
               setGroups(msg.groups[myIndex]);
             }
           }
-          // 🔥 UI notification AFTER state updates
+
+          // reshuffle notification (from server)
           if (msg.reshuffled) {
             setTimeout(() => {
-              setGameMessage("Draw pile empty — reshuffling discard pile…");
+              setGameMessage(
+                "Draw pile empty — reshuffling discard pile into deck…"
+              );
               setTimeout(() => setGameMessage(null), 3000);
             }, 10);
           }
@@ -273,13 +284,34 @@ export default function useWebSocket(roomId) {
           setTurn(null);
           setWinner(msg.winner);
           setGameOver(true);
-
           setLastDrawnCardId(null);
           break;
         }
 
+        // Opponent wants rematch (server may send either of these names)
+
         case "rematch_pending": {
-          setOpponentRematch(msg.requested);
+          console.log("In rematch rematch_pending", msg);
+          const from = msg.requested; // backend always sends {requested: pi}
+          if (from !== playerIndexRef.current) {
+            setRematchRequestedByOpponent(from);
+          }
+
+          break;
+        }
+
+        // Opponent accepted your request → server will shortly send game_start
+        case "rematch_accept": {
+          setRematchAccepted(true);
+          setRematchRejected(false);
+          // don't set gameOver here; game_start will reset it
+          setGameMessage("Rematch accepted — starting new game…");
+          break;
+        }
+
+        // Opponent rejected your request → they will also send "leave"
+        case "rematch_reject": {
+          setRematchRejected(true);
           break;
         }
 
@@ -310,7 +342,6 @@ export default function useWebSocket(roomId) {
       console.warn("[WS] Disconnected");
       setIsConnected(false);
 
-      // Only show disconnect error if game didn't finish
       if (!gameFinishedRef.current) {
         setGameMessage("Connection lost. Please refresh.");
       }
@@ -351,8 +382,9 @@ export default function useWebSocket(roomId) {
 
     gameOver,
     winner,
-    opponentRematch,
-    requestRematch,
+    rematchRequestedByOpponent,
+    rematchRejected,
+
     // Local mutators used by App DnD logic
     setHand,
     setGroups,

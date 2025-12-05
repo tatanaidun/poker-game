@@ -155,14 +155,16 @@
   margin-top: 10px;
   border-radius: 6px;
 }
-
 .rematch-box {
-  margin: 20px auto;
+  margin-top: 20px;
   padding: 24px;
   border-radius: 10px;
   background: #fff7e6;
   text-align: center;
-  width: 80%;
+}
+
+.rematch-actions {
+  margin-top: 16px;
 }
 
 .green-btn {
@@ -172,8 +174,13 @@
   border: none;
   border-radius: 6px;
   color: white;
-  font-size: 18px;
+  font-size: 16px;
   cursor: pointer;
+}
+
+.green-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .red-btn {
@@ -182,6 +189,6 @@
   border: none;
   border-radius: 6px;
   color: white;
-  font-size: 18px;
+  font-size: 16px;
   cursor: pointer;
 }
